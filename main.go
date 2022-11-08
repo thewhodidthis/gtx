@@ -4,12 +4,18 @@ import (
 	"crypto/sha1"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 const configFile = ".ht_git2html"
@@ -37,11 +43,11 @@ func main() {
 
 	args := os.Args
 
-	if len(args) != 2 {
-		log.Fatalf("jimmy: please specify a single target path")
-	}
+	// if len(args) != 2 {
+	// 	log.Fatalf("jimmy: please specify a single target path")
+	// }
 
-	targetDir := args[1]
+	targetDir := args[len(args)-1]
 
 	if ok := filepath.IsAbs(targetDir); !ok {
 		cwd, err := os.Getwd()
@@ -90,4 +96,83 @@ func main() {
 		Branches:         b,
 		Template:         hex.EncodeToString(h.Sum(nil)),
 	})
+
+	// Repository
+	dirs := []string{"branches", "commits", "objects"}
+
+	for _, dir := range dirs {
+		d := filepath.Join(targetDir, dir)
+
+		// Clear existing dirs if force true.
+		if f && dir != "branches" {
+			if err := os.RemoveAll(d); err != nil {
+				log.Printf("jimmy: unable to remove directory: %v", err)
+			}
+		}
+
+		if err := os.MkdirAll(d, os.ModePerm); err != nil {
+			log.Printf("jimmy: unable to create directory: %v", err)
+		}
+	}
+
+	var pathError *fs.PathError
+	repo := filepath.Join(targetDir, "repository")
+
+	_, err = os.Stat(repo)
+
+	if errors.As(err, &pathError) {
+		ro, err := git.PlainClone(repo, false, &git.CloneOptions{
+			URL:      r,
+			Progress: os.Stdout,
+		})
+
+		co, err := ro.CommitObjects()
+
+		if err != nil {
+			log.Printf("%v", err)
+		}
+
+		co.ForEach(func(c *Commit) error {
+			log.Print(c)
+			return nil
+		})
+
+		branches, err := ro.Branches()
+
+		if err != nil {
+			log.Printf("%v", err)
+		}
+
+		branch, err := branches.Next()
+
+		if err != nil {
+			log.Printf("jimmy: failed to clone repo: %v", err)
+		}
+
+		ref := plumbing.NewHashReference(branch.Name(), branch.Hash())
+
+		if err != nil {
+			log.Printf("jimmy: failed to clone repo: %v", err)
+		}
+
+		w, err := ro.Worktree()
+
+		if err != nil {
+			log.Printf("jimmy: failed to clone repo: %v", err)
+		}
+
+		err = w.Checkout(&git.CheckoutOptions{
+			Hash: ref.Hash(),
+		})
+
+		if err != nil {
+			log.Printf("jimmy: failed to clone repo: %v", err)
+		}
+
+		err = ro.Storer.RemoveReference(ref.Name())
+
+		if err != nil {
+			log.Printf("jimmy: failed to clone repo: %v", err)
+		}
+	}
 }
