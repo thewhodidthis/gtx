@@ -1,8 +1,8 @@
 package main
 
 import (
-	_ "embed"
 	"crypto/sha1"
+	_ "embed"
 	"encoding/hex"
 	"flag"
 	"io"
@@ -17,7 +17,6 @@ const configFile = ".ht_git2html"
 //go:embed config.tmpl
 var tmpl string
 
-// !goimports -w %
 func main() {
 	var p string
 	var r string
@@ -42,20 +41,20 @@ func main() {
 		log.Fatalf("jimmy: please specify a single target path")
 	}
 
-	t := args[1]
+	targetDir := args[1]
 
-	if ok := filepath.IsAbs(t); !ok {
+	if ok := filepath.IsAbs(targetDir); !ok {
 		cwd, err := os.Getwd()
 
 		if err != nil {
 			log.Fatalf("jimmy: %v", err)
 		}
 
-		t = filepath.Join(cwd, t)
+		targetDir = filepath.Join(cwd, targetDir)
 	}
 
 	// TODO: Look up more mode for 755 or 644.
-	if err := os.MkdirAll(t, os.ModePerm); err != nil {
+	if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
 		log.Fatalf("jimmy: unable to create target directory: %v", err)
 	}
 
@@ -63,7 +62,7 @@ func main() {
 
 	// TODO: Check file permissions are set to 0666.
 	// TODO: Read file if it exists.
-	outFile, err := os.Create(filepath.Join(t, configFile))
+	outFile, err := os.Create(filepath.Join(targetDir, configFile))
 
 	if err != nil {
 		log.Fatalf("jimmy: unable to create config file: %v", err)
@@ -76,19 +75,19 @@ func main() {
 	}
 
 	configTmpl.Execute(outFile, struct {
-		Project string
-		Repository string
+		Project          string
+		Repository       string
 		PublicRepository string
-		Target string
-		Branches string
+		Target           string
+		Branches         string
 		// SHA1SUM
 		Template string
 	}{
-		Project: p,
-		Repository: r,
+		Project:          p,
+		Repository:       r,
 		PublicRepository: l,
-		Target: t,
-		Branches: b,
-		Template: hex.EncodeToString(h.Sum(nil)),
+		Target:           targetDir,
+		Branches:         b,
+		Template:         hex.EncodeToString(h.Sum(nil)),
 	})
 }
