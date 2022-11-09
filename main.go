@@ -132,7 +132,7 @@ func main() {
 			log.Printf("%v", err)
 		}
 
-		co.ForEach(func(c *Commit) error {
+		co.ForEach(func(c *object.Commit) error {
 			log.Print(c)
 			return nil
 		})
