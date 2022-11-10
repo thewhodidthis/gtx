@@ -24,22 +24,22 @@ const configFile = ".ht_git2html"
 var tmpl string
 
 func main() {
-	var p string
-	var r string
-	var l string
-	var b string
-	var q bool
-	var f bool
+	var project string
+	var repo string
+	var link string
+	var branches string
+	var quiet bool
+	var force bool
 
-	flag.StringVar(&p, "p", "My project", "Choose a project name")
-	flag.StringVar(&r, "r", "/path/to/repo", "Repository to clone from")
-	flag.StringVar(&l, "l", "http://host.org/project.git", "Public link to repo")
-	flag.StringVar(&b, "b", "all", "List of branches")
-	flag.BoolVar(&q, "q", false, "Be quiet")
-	flag.BoolVar(&f, "f", false, "Force rebuilding of all pages")
+	flag.StringVar(&project, "p", "My project", "Choose a project name")
+	flag.StringVar(&repo, "r", "/path/to/repo", "Repository to clone from")
+	flag.StringVar(&link, "l", "http://host.org/project.git", "Public link to repo")
+	flag.StringVar(&branches, "b", "all", "List of branches")
+	flag.BoolVar(&quiet, "q", false, "Be quiet")
+	flag.BoolVar(&force, "f", false, "Force rebuilding of all pages")
 	flag.Parse()
 
-	log.Printf("%v %v %v %v %v %v", p, r, l, b, q, f)
+	log.Printf("%v %v %v %v %v %v", project, repo, link, branches, quiet, force)
 
 	args := os.Args
 
@@ -89,11 +89,11 @@ func main() {
 		// SHA1SUM
 		Template string
 	}{
-		Project:          p,
-		Repository:       r,
-		PublicRepository: l,
+		Project:          project,
+		Repository:       repo,
+		PublicRepository: link,
 		Target:           targetDir,
-		Branches:         b,
+		Branches:         branches,
 		Template:         hex.EncodeToString(h.Sum(nil)),
 	})
 
@@ -104,7 +104,7 @@ func main() {
 		d := filepath.Join(targetDir, dir)
 
 		// Clear existing dirs if force true.
-		if f && dir != "branches" {
+		if force && dir != "branches" {
 			if err := os.RemoveAll(d); err != nil {
 				log.Printf("jimmy: unable to remove directory: %v", err)
 			}
@@ -116,63 +116,63 @@ func main() {
 	}
 
 	var pathError *fs.PathError
-	repo := filepath.Join(targetDir, "repository")
+	repoPath := filepath.Join(targetDir, "repository")
 
-	_, err = os.Stat(repo)
+	_, err = os.Stat(repoPath)
 
 	if errors.As(err, &pathError) {
-		ro, err := git.PlainClone(repo, false, &git.CloneOptions{
-			URL:      r,
+		localRepo, err := git.PlainClone(repoPath, false, &git.CloneOptions{
+			URL:      repo,
 			Progress: os.Stdout,
 		})
 
-		co, err := ro.CommitObjects()
+		commitObjects, err := localRepo.CommitObjects()
 
 		if err != nil {
 			log.Printf("%v", err)
 		}
 
-		co.ForEach(func(c *object.Commit) error {
+		commitObjects.ForEach(func(c *object.Commit) error {
 			log.Print(c)
 			return nil
 		})
 
-		branches, err := ro.Branches()
+		localBranches, err := localRepo.Branches()
 
 		if err != nil {
 			log.Printf("%v", err)
 		}
 
-		branch, err := branches.Next()
+		branch, err := localBranches.Next()
 
 		if err != nil {
-			log.Printf("jimmy: failed to clone repo: %v", err)
+			log.Printf("jimmy: failed to list branches: %v", err)
 		}
 
 		ref := plumbing.NewHashReference(branch.Name(), branch.Hash())
 
 		if err != nil {
-			log.Printf("jimmy: failed to clone repo: %v", err)
+			log.Printf("jimmy: failed to create ref: %v", err)
 		}
 
-		w, err := ro.Worktree()
+		workTree, err := localRepo.Worktree()
 
 		if err != nil {
-			log.Printf("jimmy: failed to clone repo: %v", err)
+			log.Printf("jimmy: failed to open worktree: %v", err)
 		}
 
-		err = w.Checkout(&git.CheckoutOptions{
+		err = workTree.Checkout(&git.CheckoutOptions{
 			Hash: ref.Hash(),
 		})
 
 		if err != nil {
-			log.Printf("jimmy: failed to clone repo: %v", err)
+			log.Printf("jimmy: failed to checkout detached HEAD: %v", err)
 		}
 
-		err = ro.Storer.RemoveReference(ref.Name())
+		err = localRepo.Storer.RemoveReference(ref.Name())
 
 		if err != nil {
-			log.Printf("jimmy: failed to clone repo: %v", err)
+			log.Printf("jimmy: failed to delete branch: %v", err)
 		}
 	}
 }
