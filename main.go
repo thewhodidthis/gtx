@@ -367,11 +367,30 @@ func main() {
 			log.Printf("jimmy: failed to delete branch: %v", err)
 		}
 	}
+
+	setGitConfig()
+
+	cleanBranches := cleanUpBranches(branches)
+
+	fetchBranches(cleanBranches)
+
+	writeIndex()
+
+	doTheRealWork()
+
+	writeIndexFooter()
+}
+
+func setGitConfig() {
 	/*
 	   # git merge fails if there are not set.  Fake them.
 	   git config user.email "git2html@git2html"
 	   git config user.name "git2html"
+	*/
+}
 
+func cleanUpBranches(branches string) {
+	/*
 	   if test x"$BRANCHES" = x
 	   then
 	     # Strip the start of lines of the form 'origin/HEAD -> origin/master'
@@ -396,32 +415,41 @@ func main() {
 	     do
 	       echo "$branch"
 	     done | sort | uniq)
+	*/
+}
 
-	   for branch in $BRANCHES
-	   do
-	     # Suppress already up to date status messages, but don't use grep -v
-	     # as that returns 1 if there is no output and causes the script to
-	     # abort.
-	     git fetch --force origin "refs/heads/${branch}:refs/origin/${branch}" \
-	         | gawk '/^Already up-to-date[.]$/ { skip=1; }
-	                 { if (! skip) print; skip=0 }'
-	   done
-	   git checkout "origin/$first"
+func fetchBranches(branches string) {
+	/*
+	   	   for branch in $BRANCHES
+	   	   do
+	   	     # Suppress already up to date status messages, but don't use grep -v
+	   	     # as that returns 1 if there is no output and causes the script to
+	   	     # abort.
+	   	     git fetch --force origin "refs/heads/${branch}:refs/origin/${branch}" \
+	   	         | gawk '/^Already up-to-date[.]$/ { skip=1; }
+	   	                 { if (! skip) print; skip=0 }'
+	   	   done
+	   	   git checkout "origin/$first"
+	      }
 
-	   # For each branch and each commit create and extract an archive of the form
-	   #   $TARGET/commits/$commit
-	   #
-	   # and a link:
-	   #
-	   #   $TARGET/branches/$commit -> $TARGET/commits/$commit
+	   	   # For each branch and each commit create and extract an archive of the form
+	   	   #   $TARGET/commits/$commit
+	   	   #
+	   	   # and a link:
+	   	   #
+	   	   #   $TARGET/branches/$commit -> $TARGET/commits/$commit
 
-	   # Count the number of branch we want to process to improve reporting.
-	   bcount=0
-	   for branch in $BRANCHES
-	   do
-	     let ++bcount
-	   done
+	   	   # Count the number of branch we want to process to improve reporting.
+	   	   bcount=0
+	   	   for branch in $BRANCHES
+	   	   do
+	   	     let ++bcount
+	   	   done
+	*/
+}
 
+func writeIndex() {
+	/*
 	   INDEX="$TARGET/index.html"
 
 	   {
@@ -446,6 +474,11 @@ func main() {
 	       "<ul>"
 	   } > "$INDEX"
 
+	*/
+}
+
+func doTheRealWork() {
+	/*
 	   b=0
 	   for branch in $BRANCHES
 	   do
@@ -753,7 +786,11 @@ func main() {
 	       html_footer
 	     } >> "$BRANCH_INDEX"
 	   done
+	*/
+}
 
+func writeIndexFooter() {
+	/*
 	   {
 	     echo "</ul>"
 	     html_footer
