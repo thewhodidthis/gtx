@@ -389,7 +389,7 @@ func setGitConfig() {
 	*/
 }
 
-func cleanUpBranches(branches string) {
+func cleanUpBranches(branches string) []string {
 	/*
 	   if test x"$BRANCHES" = x
 	   then
@@ -416,9 +416,10 @@ func cleanUpBranches(branches string) {
 	       echo "$branch"
 	     done | sort | uniq)
 	*/
+  return []string{}
 }
 
-func fetchBranches(branches string) {
+func fetchBranches(branches []string) {
 	/*
 	   	   for branch in $BRANCHES
 	   	   do
