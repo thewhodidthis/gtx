@@ -7,16 +7,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
-	"text/template"
 
+	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/memory"
 )
 
 // CONFIG_FILE=".ht_git2html"
@@ -41,7 +43,16 @@ const forceRebuild = false
 */
 
 //go:embed config.tmpl
-var tmpl string
+var cTmpl string
+
+//go:embed repo.html.tmpl
+var rTmpl string
+
+//go:embed branch.html.tmpl
+var bTmpl string
+
+//go:embed index.html.tmpl
+var iTmpl string
 
 type options struct {
 	project  string
@@ -126,6 +137,9 @@ func main() {
 		flagset[f.Name] = true
 	})
 
+	// TODO: Log these one by one unless quiet.
+	// log.Printf("+%v", opts)
+
 	// The repo flag is required, print usage and quit if none given or
 	// unless a single target directory is provided.
 	if !flagset["r"] || flag.NArg() != 1 {
@@ -195,7 +209,7 @@ func writeConfigFile(target string, opts *options) {
 	   fi
 	   TEMPLATE="$CURRENT_TEMPLATE"
 	*/
-	configTmpl := template.Must(template.New("default").Parse(tmpl))
+	configTmpl := template.Must(template.New("default").Parse(cTmpl))
 
 	// TODO: Check file permissions are set to 0666.
 	// TODO: Read file if it exists.
@@ -289,15 +303,68 @@ func createDirectories(target string, force bool) {
 }
 
 func setUpRepo(target string, opts *options) {
+	mfs := memfs.New()
+	// Clones the given repository in memory, creating the remote, the local
+	// branches and fetching the objects, exactly as:
+	r, err := git.Clone(memory.NewStorage(), mfs, &git.CloneOptions{
+		URL: opts.repo,
+	})
+
+	check(err)
+
+	refs, _ := r.References()
+	refs.ForEach(func(ref *plumbing.Reference) error {
+		bc, err := r.Branch("refs/head/experimental")
+
+		if err != nil {
+			return err
+		}
+
+		log.Printf("reference: %v %v", ref.Type(), ref.Name())
+		log.Printf("branch: %v", bc.Name)
+
+		return nil
+	})
+
+	branches, err := r.Branches()
+
+	check(err)
+
+	// ... retrieves the branch pointed by HEAD
+	// ref, err := r.Head()
+	//
+	// check(err)
+	//
+	// cIter, err := r.Log(&git.LogOptions{From: ref.Hash()})
+	//
+	// check(err)
+
+	// err = cIter.ForEach(func(c *object.Commit) error {
+	// 	// log.Print(c)
+	//
+	// 	return nil
+	// })
+
+	branches.ForEach(func(b *plumbing.Reference) error {
+		log.Printf("branch: %v", b)
+
+		return nil
+	})
+
+	check(err)
+
 	var pathError *fs.PathError
 	repoPath := filepath.Join(target, "repository")
 
-	_, err := os.Stat(repoPath)
+	_, err = os.Stat(repoPath)
 
 	if errors.As(err, &pathError) {
 		localRepo, err := git.PlainClone(repoPath, false, &git.CloneOptions{
-			URL:      opts.repo,
-			Progress: os.Stdout,
+			URL:          opts.repo,
+			SingleBranch: false,
+			NoCheckout:   true,
+			// NOTE: This will screw things up if piping output to a file.
+			// Progress: os.Stdout,
 		})
 
 		commitObjects, err := localRepo.CommitObjects()
@@ -306,10 +373,27 @@ func setUpRepo(target string, opts *options) {
 			log.Printf("%v", err)
 		}
 
+		var commitList []*object.Commit
+
 		commitObjects.ForEach(func(c *object.Commit) error {
-			log.Print(c)
+			commitList = append(commitList, c)
+
 			return nil
 		})
+
+		// it := template.Must(template.New("default").Parse(iTmpl))
+		//
+		// cdata := struct {
+		// 	List  []*object.Commit
+		// 	Title string
+		// }{
+		// 	List:  commitList,
+		// 	Title: opts.project,
+		// }
+		//
+		// if err := it.Execute(os.Stdout, cdata); err != nil {
+		// 	log.Fatalf("jimmy: unable to fill index template: %v", err)
+		// }
 
 		localBranches, err := localRepo.Branches()
 
@@ -317,37 +401,76 @@ func setUpRepo(target string, opts *options) {
 			log.Printf("%v", err)
 		}
 
-		branch, err := localBranches.Next()
+		var branchList []*plumbing.Reference
 
-		if err != nil {
-			log.Printf("jimmy: failed to list branches: %v", err)
-		}
+		localBranches.ForEach(func(b *plumbing.Reference) error {
+			branchList = append(branchList, b)
 
-		ref := plumbing.NewHashReference(branch.Name(), branch.Hash())
-
-		if err != nil {
-			log.Printf("jimmy: failed to create ref: %v", err)
-		}
-
-		workTree, err := localRepo.Worktree()
-
-		if err != nil {
-			log.Printf("jimmy: failed to open worktree: %v", err)
-		}
-
-		err = workTree.Checkout(&git.CheckoutOptions{
-			Hash: ref.Hash(),
+			return nil
 		})
 
-		if err != nil {
-			log.Printf("jimmy: failed to checkout detached HEAD: %v", err)
+		rt := template.Must(template.New("default").Parse(rTmpl))
+
+		rconf, err := localRepo.Config()
+
+		check(err)
+
+		for _, b := range rconf.Branches {
+			log.Print(b.Name)
 		}
 
-		err = localRepo.Storer.RemoveReference(ref.Name())
+		log.Printf("config/branches: %v", rconf.Branches)
+		log.Printf("config/remotes: %v", rconf.Remotes)
 
-		if err != nil {
-			log.Printf("jimmy: failed to delete branch: %v", err)
+		bdata := struct {
+			Description string
+			Link        string
+			List        []*plumbing.Reference
+			Title       string
+		}{
+			Description: "",
+			Link:        opts.link,
+			List:        branchList,
+			Title:       opts.project,
 		}
+
+		if err := rt.Execute(os.Stdout, bdata); err != nil {
+			log.Fatalf("jimmy: unable to fill home template: %v", err)
+		}
+
+		// branch, err := localBranches.Next()
+		//
+		// log.Printf("branch: %v %s", branch.Name(), branch.String())
+		//
+		// if err != nil {
+		// 	log.Printf("jimmy: failed to list branches: %v", err)
+		// }
+		//
+		// ref := plumbing.NewHashReference(branch.Name(), branch.Hash())
+		//
+		// if err != nil {
+		// 	log.Printf("jimmy: failed to create ref: %v", err)
+		// }
+
+		// workTree, err := localRepo.Worktree()
+		//
+		// if err != nil {
+		// 	log.Printf("jimmy: failed to open worktree: %v", err)
+		// }
+		//
+		// err = workTree.Checkout(&git.CheckoutOptions{
+		// 	Hash: ref.Hash(),
+		// })
+		//
+		// if err != nil {
+		// 	log.Printf("jimmy: failed to checkout detached HEAD: %v", err)
+		// }
+		//
+		// err = localRepo.Storer.RemoveReference(ref.Name())
+		//
+		// if err != nil {
+		// 	log.Printf("jimmy: failed to delete branch: %v", err)
+		// }
 	}
 }
 
@@ -806,4 +929,10 @@ func htmlFooter() {
 	       "<a href=\"http://hssl.cs.jhu.edu/~neal/git2html\">git2html</a>."
 	   }
 	*/
+}
+
+func check(err error) {
+	if err != nil {
+		log.Fatalf("jimmy: %v", err)
+	}
 }
