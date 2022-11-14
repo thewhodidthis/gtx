@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -19,7 +20,7 @@ import (
 )
 
 // CONFIG_FILE=".ht_git2html"
-const configFile = ".ht_git2html"
+const configFile = ".config"
 
 /*
 show_progress=1
@@ -51,9 +52,17 @@ type options struct {
 	force    bool
 }
 
+func init() {
+	// Override default usage output.
+	flag.Usage = func() {
+		// Print usage example ahead of lisiting default options.
+		fmt.Fprintln(flag.CommandLine.Output(), "usage:", os.Args[0], "[<options>] <path>")
+		flag.PrintDefaults()
+	}
+}
+
 /*
 usage()
-
 	{
 	  echo "Usage $0 [-prlbq] TARGET"
 	  echo "Generate static HTML pages in TARGET for the specified git repository."
@@ -102,61 +111,47 @@ func main() {
 	opts := &options{}
 
 	flag.StringVar(&opts.project, "p", "My project", "Project's name")
-	flag.StringVar(&opts.repo, "r", "/path/to/repo", "Repository to clone from.")
+	flag.StringVar(&opts.repo, "r", "", "Repository to clone from.")
 	flag.StringVar(&opts.link, "l", "http://host.org/project.git", "Public repository link, e.g., 'http://host.org/project.git'")
 	flag.StringVar(&opts.branches, "b", "all", "List of branches (default: all)")
 	flag.BoolVar(&opts.quiet, "q", false, "Be quiet.")
 	flag.BoolVar(&opts.force, "f", false, "Force rebuilding of all pages.")
 	flag.Parse()
 
-	// TODO: print usage?
-	/*
-	   if test $# -ne 1
-	   then
-	     usage 1
-	   fi
-	*/
+	// Collect flags provided. Note these need to come before
+	// the target directory argument.
+	flagset := make(map[string]bool)
 
-	log.Printf("+%v", opts)
+	flag.Visit(func(f *flag.Flag) {
+		flagset[f.Name] = true
+	})
 
-	args := os.Args
+	// The repo flag is required, print usage and quit if none given or
+	// unless a single target directory is provided.
+	if !flagset["r"] || flag.NArg() != 1 {
+		flag.Usage()
+		os.Exit(1)
+	}
 
-	// TODO: check only one target
-	// if len(args) != 2 {
-	// 	log.Fatalf("jimmy: please specify a single target path")
-	// }
+	target := flag.Arg(0)
 
-	//# Where to create the html pages.
-	//TARGET="$1"
-	targetDir := args[len(args)-1]
-
-	//# Make sure TARGET is an absolute path.
-	/*
-	   if test x"${TARGET%%/*}" != x
-	   then
-	       TARGET=$(pwd)/$TARGET
-	   fi
-	*/
-
-	if ok := filepath.IsAbs(targetDir); !ok {
+	// Make sure `target` is an absolute path.
+	if ok := filepath.IsAbs(target); !ok {
 		cwd, err := os.Getwd()
 
 		if err != nil {
-			log.Fatalf("jimmy: %v", err)
+			log.Fatalf("jimmy: unable to get current working directory %v", err)
 		}
 
-		targetDir = filepath.Join(cwd, targetDir)
+		target = filepath.Join(cwd, target)
 	}
 
-	//# Make sure the target exists.
-	//mkdir -p "$TARGET"
-
-	// TODO: Look up more mode for 755 or 644.
-	if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
+	// Make sure `target` exists.
+	if err := os.MkdirAll(target, 0750); err != nil {
 		log.Fatalf("jimmy: unable to create target directory: %v", err)
 	}
 
-	//# Read the configuration file.
+	// Read the configuration file.
 	/*
 	   if test -e "$TARGET/$CONFIG_FILE"
 	   then
@@ -164,20 +159,13 @@ func main() {
 	   fi
 	*/
 	// TODO: Read config file
+	writeConfigFile(target, opts)
+	createDirectories(target, opts.force)
 
-	// TODO: Check repository is required
-	/*
-	   if test x"$REPOSITORY" = x
-	   then
-	     echo "-r required."
-	     echo
-	     usage 1
-	   fi
-	*/
-
-	writeConfigFile(targetDir, opts)
-
-	// TODO: check how to make -r arg mandatory
+	// NOTE: I believe this check is too limiting and we should
+	// allow for cloning no local repos as well. Once the repo
+	// has been copied or downloaded, we should then check if it
+	// contains a hidden `.git` folder to verify true repo status?
 	/*
 	   if test ! -d "$REPOSITORY"
 	   then
@@ -185,25 +173,18 @@ func main() {
 	     exit 1
 	   fi
 	*/
-
-	createDirectories(targetDir, opts.force)
-
-	setUpRepo(targetDir, opts)
-
+	setUpRepo(target, opts)
 	setGitConfig()
 
 	cleanBranches := cleanUpBranches(opts.branches)
 
 	fetchBranches(cleanBranches)
-
 	writeIndex()
-
 	doTheRealWork()
-
 	writeIndexFooter()
 }
 
-func writeConfigFile(targetDir string, opts *options) {
+func writeConfigFile(target string, opts *options) {
 	/*
 	   # The output version
 	   CURRENT_TEMPLATE="$(sha1sum "$0")"
@@ -218,7 +199,7 @@ func writeConfigFile(targetDir string, opts *options) {
 
 	// TODO: Check file permissions are set to 0666.
 	// TODO: Read file if it exists.
-	outFile, err := os.Create(filepath.Join(targetDir, configFile))
+	outFile, err := os.Create(filepath.Join(target, configFile))
 
 	if err != nil {
 		log.Fatalf("jimmy: unable to create config file: %v", err)
@@ -258,13 +239,13 @@ func writeConfigFile(targetDir string, opts *options) {
 		Project:          opts.project,
 		Repository:       opts.repo,
 		PublicRepository: opts.link,
-		Target:           targetDir,
+		Target:           target,
 		Branches:         opts.branches,
 		Template:         hex.EncodeToString(h.Sum(nil)),
 	})
 }
 
-func createDirectories(targetDir string, force bool) {
+func createDirectories(target string, force bool) {
 	//# Ensure that some directories we need exist.
 	/*
 	   if test x"$force_rebuild" = x1
@@ -292,7 +273,7 @@ func createDirectories(targetDir string, force bool) {
 	dirs := []string{"branches", "commits", "objects"}
 
 	for _, dir := range dirs {
-		d := filepath.Join(targetDir, dir)
+		d := filepath.Join(target, dir)
 
 		// Clear existing dirs if force true.
 		if force && dir != "branches" {
@@ -307,11 +288,11 @@ func createDirectories(targetDir string, force bool) {
 	}
 }
 
-func setUpRepo(targetDir string, opts *options) {
+func setUpRepo(target string, opts *options) {
 	var pathError *fs.PathError
-	repoPath := filepath.Join(targetDir, "repository")
+	repoPath := filepath.Join(target, "repository")
 
-  _, err := os.Stat(repoPath)
+	_, err := os.Stat(repoPath)
 
 	if errors.As(err, &pathError) {
 		localRepo, err := git.PlainClone(repoPath, false, &git.CloneOptions{
@@ -371,6 +352,7 @@ func setUpRepo(targetDir string, opts *options) {
 }
 
 // TODO: implement!
+// NOTE: This may not be required, there is no merge calls anywhere.
 func setGitConfig() {
 	/*
 	   # git merge fails if there are not set.  Fake them.
