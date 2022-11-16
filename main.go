@@ -121,12 +121,12 @@ func main() {
 	*/
 	opts := &options{}
 
-	flag.StringVar(&opts.project, "p", "My project", "Project's name")
-	flag.StringVar(&opts.repo, "r", "", "Repository to clone from.")
-	flag.StringVar(&opts.link, "l", "http://host.org/project.git", "Public repository link, e.g., 'http://host.org/project.git'")
-	flag.StringVar(&opts.branches, "b", "all", "List of branches (default: all)")
-	flag.BoolVar(&opts.quiet, "q", false, "Be quiet.")
-	flag.BoolVar(&opts.force, "f", false, "Force rebuilding of all pages.")
+	flag.StringVar(&opts.project, "p", "My project", "Project name")
+	flag.StringVar(&opts.repo, "r", "", "Target repo")
+	flag.StringVar(&opts.link, "l", "http://host.org/project.git", "Repo link")
+	flag.StringVar(&opts.branches, "b", "all", "Target branches")
+	flag.BoolVar(&opts.quiet, "q", false, "Be quiet")
+	flag.BoolVar(&opts.force, "f", false, "Force rebuilding of all pages")
 	flag.Parse()
 
 	// Collect flags provided. Note these need to come before
