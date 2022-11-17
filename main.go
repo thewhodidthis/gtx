@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"text/tabwriter"
 )
 
 //go:embed repo.html.tmpl
@@ -25,27 +26,27 @@ var iTmpl string
 // https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
 type manyflag []string
 
-func (b *manyflag) Set(value string) error {
+func (f *manyflag) Set(value string) error {
 	// Make sure there are no duplicates.
-	if !includes(*b, value) {
-		*b = append(*b, value)
+	if !includes(*f, value) {
+		*f = append(*f, value)
 	}
 
 	return nil
 }
 
-func (b *manyflag) String() string {
-	return strings.Join(*b, ", ")
+func (f *manyflag) String() string {
+	return strings.Join(*f, ", ")
 }
 
 type options struct {
-	Branches manyflag `json:"branches"`
-	Force    bool  `json:"force"`
 	name     string
-	Project  string `json:"project"`
-	Quiet    bool   `json:"quiet"`
-	Repo     string `json:"repo"`
-	URL      string `json:"url"`
+	Branches manyflag `json:"branches"`
+	Force    bool     `json:"force"`
+	Project  string   `json:"project"`
+	Quiet    bool     `json:"quiet"`
+	Repo     string   `json:"repo"`
+	URL      string   `json:"url"`
 }
 
 // Helps store options into a JSON config file.
@@ -84,7 +85,7 @@ func main() {
 	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Repo public URL")
 	flag.Var(&opt.Branches, "b", "Target branches")
 	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
-	flag.BoolVar(&opt.Force, "f", false, "Force rebuilding of all pages")
+	flag.BoolVar(&opt.Force, "f", false, "Force rebuild")
 	flag.Parse()
 
 	if opt.Quiet {
@@ -132,6 +133,7 @@ func main() {
 	})
 
 	ref := reflect.ValueOf(store)
+	tab := tabwriter.NewWriter(log.Writer(), 0, 0, 0, '.', 0)
 
 	flag.VisitAll(func(f *flag.Flag) {
 		// Attempt to source settings from config file, then override flag defaults.
@@ -151,9 +153,10 @@ func main() {
 			}
 		}
 
-		// Log current settings.
-		log.Printf("%s/%s: %v\n", f.Name, f.Usage, f.Value)
+		fmt.Fprintf(tab, "jimmy: -%s \t%s\t: %v\n", f.Name, f.Usage, f.Value)
 	})
+
+	tab.Flush()
 
 	// The repo flag is required at this point.
 	// NOTE: Being able to handle non-local repos would be nice.
