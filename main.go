@@ -25,9 +25,11 @@ var iTmpl string
 // https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
 type bflag []string
 
-// TODO: Make sure these are unique.
 func (b *bflag) Set(value string) error {
-	*b = append(*b, value)
+	// Make sure there are no duplicates.
+	if !includes(*b, value) {
+		*b = append(*b, value)
+	}
 
 	return nil
 }
@@ -683,4 +685,15 @@ func htmlFooter() {
 	       "<a href=\"http://hssl.cs.jhu.edu/~neal/git2html\">git2html</a>."
 	   }
 	*/
+}
+
+// Helps decide if value contained in slice.
+func includes(s []string, n string) bool {
+	for _, v := range s {
+		if v == n {
+			return true
+		}
+	}
+
+	return false
 }
