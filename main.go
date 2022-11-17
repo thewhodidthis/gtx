@@ -1,49 +1,17 @@
 package main
 
 import (
-	"crypto/sha1"
 	_ "embed"
-	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"html/template"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
-
-	"github.com/go-git/go-billy/v5/memfs"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/storage/memory"
+	"reflect"
+	"strings"
 )
-
-// CONFIG_FILE=".ht_git2html"
-const configFile = ".config"
-
-/*
-show_progress=1
-force_rebuild=0
-*/
-const showProgress = true
-const forceRebuild = false
-
-// TODO: add log.Debug
-/*
- progress()
- {
-   if test x"$show_progress" = x1
-   then
-     echo "$@"
-   fi
- }
-*/
-
-//go:embed config.tmpl
-var cTmpl string
 
 //go:embed repo.html.tmpl
 var rTmpl string
@@ -55,12 +23,26 @@ var bTmpl string
 var iTmpl string
 
 type options struct {
-	project  string
-	repo     string
-	link     string
-	branches string
-	quiet    bool
-	force    bool
+	name     string
+	Project  string `json:"project"`
+	Repo     string `json:"repo"`
+	URL      string `json:"url"`
+	Branches string `json:"branches"`
+	Quiet    bool   `json:"quiet"`
+	Force    bool   `json:"force"`
+}
+
+// Helps store options into a JSON config file.
+func (o *options) save(out string) {
+	bs, err := json.MarshalIndent(o, "", "  ")
+
+	if err != nil {
+		log.Fatalf("unable to encode config file: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(out, o.name), bs, 0644); err != nil {
+		log.Fatalf("unable to save config file: %v", err)
+	}
 }
 
 func init() {
@@ -70,116 +52,106 @@ func init() {
 		fmt.Fprintln(flag.CommandLine.Output(), "usage:", os.Args[0], "[<options>] <path>")
 		flag.PrintDefaults()
 	}
+
+	// Swap default logger timestamps for a custom prefix.
+	log.SetFlags(log.Lmsgprefix)
+	log.SetPrefix("jimmy: ")
 }
 
-/*
-usage()
-	{
-	  echo "Usage $0 [-prlbq] TARGET"
-	  echo "Generate static HTML pages in TARGET for the specified git repository."
-	  echo
-	  echo "  -p  Project's name"
-	  echo "  -r  Repository to clone from."
-	  echo "  -l  Public repository link, e.g., 'http://host.org/project.git'"
-	  echo "  -b  List of branches to process (default: all)."
-	  echo "  -q  Be quiet."
-	  echo "  -f  Force rebuilding of all pages."
-	  exit $1
-	}
-*/
 func main() {
-	/*
-	   while getopts ":p:r:l:b:qf" opt
-	   do
-	     case $opt in
-	       p)
-	         PROJECT=$OPTARG
-	         ;;
-	       r)
-	         # Directory containing the repository.
-	         REPOSITORY=$OPTARG
-	         ;;
-	       l)
-	         PUBLIC_REPOSITORY=$OPTARG
-	         ;;
-	       b)
-	         BRANCHES=$OPTARG
-	         ;;
-	       q)
-	         show_progress=0
-	         ;;
-	       f)
-	         force_rebuild=1
-	         ;;
-	       \?)
-	         echo "Invalid option: -$OPTARG" >&2
-	         usage
-	         ;;
-	     esac
-	   done
-	   shift $(($OPTIND - 1))
-	*/
-	opts := &options{}
+	opt := &options{
+		name: ".jimmy.json",
+	}
 
-	flag.StringVar(&opts.project, "p", "My project", "Project name")
-	flag.StringVar(&opts.repo, "r", "", "Target repo")
-	flag.StringVar(&opts.link, "l", "http://host.org/project.git", "Repo link")
-	flag.StringVar(&opts.branches, "b", "all", "Target branches")
-	flag.BoolVar(&opts.quiet, "q", false, "Be quiet")
-	flag.BoolVar(&opts.force, "f", false, "Force rebuilding of all pages")
+	flag.StringVar(&opt.Project, "p", "Jimbo", "Project title")
+	flag.StringVar(&opt.Repo, "r", "", "Target repo")
+	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Repo public URL")
+	// TODO: Allow for passing multiple values.
+	flag.StringVar(&opt.Branches, "b", "all", "Target branches")
+	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
+	flag.BoolVar(&opt.Force, "f", false, "Force rebuilding of all pages")
 	flag.Parse()
 
-	// Collect flags provided. Note these need to come before
-	// the target directory argument.
+	if opt.Quiet {
+		log.SetOutput(io.Discard)
+	}
+
+	cwd, err := os.Getwd()
+
+	if err != nil {
+		log.Fatalf("unable to get current working directory: %v", err)
+	}
+
+	// Defaults to the current working directory if no argument present.
+	out := flag.Arg(0)
+
+	// Make sure `out` is an absolute path.
+	if ok := filepath.IsAbs(out); !ok {
+		out = filepath.Join(cwd, out)
+	}
+
+	// Attempt to read saved settings.
+	obs, err := os.ReadFile(filepath.Join(out, opt.name))
+
+	if err != nil {
+		log.Printf("unable to read config file: %v", err)
+	}
+
+	// Create a separate options instance for reading config file values into.
+	// NOTE: Need dereference to safely copy.
+	cnf := *opt
+
+	// If a config file exists and an option has not been set, override default to match.
+	if err := json.Unmarshal(obs, &cnf); err != nil {
+		log.Printf("unable to parse config file: %v", err)
+	}
+
+	// Collect flags provided.
 	flagset := make(map[string]bool)
 
+	// NOTE: These need to come before the output directory argument.
 	flag.Visit(func(f *flag.Flag) {
 		flagset[f.Name] = true
 	})
 
-	// TODO: Log these one by one unless quiet.
-	// log.Printf("+%v", opts)
+	ref := reflect.ValueOf(cnf)
 
-	// The repo flag is required, print usage and quit if none given or
-	// unless a single target directory is provided.
-	if !flagset["r"] || flag.NArg() != 1 {
+	// Log current settings.
+	flag.VisitAll(func(f *flag.Flag) {
+		if !flagset[f.Name] {
+			// Attempt to override default settings where necessary.
+			v := ref.FieldByNameFunc(func(n string) bool {
+				return strings.HasPrefix(strings.ToLower(n), f.Name)
+			})
+
+			// This has the nice side effect of magically overriding `opt` fields.
+			flag.Set(f.Name, v.String())
+		}
+
+		log.Printf("%v/%v: %v\n", f.Name, f.Usage, f.Value)
+	})
+
+	// The repo flag is required at this point.
+	// NOTE: Being able to handle non-local repos would be nice.
+	if ok := filepath.IsAbs(opt.Repo); !ok {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	target := flag.Arg(0)
-
-	// Make sure `target` is an absolute path.
-	if ok := filepath.IsAbs(target); !ok {
-		cwd, err := os.Getwd()
-
-		if err != nil {
-			log.Fatalf("jimmy: unable to get current working directory %v", err)
-		}
-
-		target = filepath.Join(cwd, target)
+	// Option considered repo-like if it contains a hidden `.git` dir.
+	if _, err := os.Stat(filepath.Join(opt.Repo, ".git")); os.IsNotExist(err) {
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	// Make sure `target` exists.
-	if err := os.MkdirAll(target, 0750); err != nil {
-		log.Fatalf("jimmy: unable to create target directory: %v", err)
+	// Make sure `out` exists.
+	if err := os.MkdirAll(out, 0750); err != nil {
+		log.Fatalf("unable to create output directory: %v", err)
 	}
 
-	// Read the configuration file.
-	/*
-	   if test -e "$TARGET/$CONFIG_FILE"
-	   then
-	     . "$TARGET/$CONFIG_FILE"
-	   fi
-	*/
-	// TODO: Read config file
-	writeConfigFile(target, opts)
-	createDirectories(target, opts.force)
+	// Save current settings for future use.
+	opt.save(out)
 
-	// NOTE: I believe this check is too limiting and we should
-	// allow for cloning no local repos as well. Once the repo
-	// has been copied or downloaded, we should then check if it
-	// contains a hidden `.git` folder to verify true repo status?
 	/*
 	   if test ! -d "$REPOSITORY"
 	   then
@@ -187,76 +159,15 @@ func main() {
 	     exit 1
 	   fi
 	*/
-	setUpRepo(target, opts)
-	setGitConfig()
+	createDirectories(out, opt.Force)
+	setUpRepo(out, opt)
 
-	cleanBranches := cleanUpBranches(opts.branches)
+	cleanBranches := cleanUpBranches(opt.Branches)
 
 	fetchBranches(cleanBranches)
 	writeIndex()
 	doTheRealWork()
 	writeIndexFooter()
-}
-
-func writeConfigFile(target string, opts *options) {
-	/*
-	   # The output version
-	   CURRENT_TEMPLATE="$(sha1sum "$0")"
-	   if test "x$CURRENT_TEMPLATE" != "x$TEMPLATE"
-	   then
-	     progress "Rebuilding all pages as output template changed."
-	     force_rebuild=1
-	   fi
-	   TEMPLATE="$CURRENT_TEMPLATE"
-	*/
-	configTmpl := template.Must(template.New("default").Parse(cTmpl))
-
-	// TODO: Check file permissions are set to 0666.
-	// TODO: Read file if it exists.
-	outFile, err := os.Create(filepath.Join(target, configFile))
-
-	if err != nil {
-		log.Fatalf("jimmy: unable to create config file: %v", err)
-	}
-
-	h := sha1.New()
-
-	// (spike): why did we do this step?
-	if _, err := io.Copy(h, outFile); err != nil {
-		log.Fatal(err)
-	}
-
-	/*
-	   {
-	     save()
-	     {
-	       # Prefer environment variables and arguments to the configuration file.
-	       echo "$1=\"\${$1:-\"$2\"}\""
-	     }
-	     save "PROJECT" "$PROJECT"
-	     save "REPOSITORY" "$REPOSITORY"
-	     save "PUBLIC_REPOSITORY" "$PUBLIC_REPOSITORY"
-	     save "TARGET" "$TARGET"
-	     save "BRANCHES" "$BRANCHES"
-	     save "TEMPLATE" "$TEMPLATE"
-	   } > "$TARGET/$CONFIG_FILE"
-	*/
-	configTmpl.Execute(outFile, struct {
-		Project          string
-		Repository       string
-		PublicRepository string
-		Target           string
-		Branches         string
-		// SHA1SUM
-		Template string
-	}{
-		Project:          opts.project,
-		Repository:       opts.repo,
-		PublicRepository: opts.link,
-		Target:           target,
-		Branches:         opts.branches,
-		Template:         hex.EncodeToString(h.Sum(nil)),
-	})
 }
 
 func createDirectories(target string, force bool) {
@@ -292,196 +203,17 @@ func createDirectories(target string, force bool) {
 		// Clear existing dirs if force true.
 		if force && dir != "branches" {
 			if err := os.RemoveAll(d); err != nil {
-				log.Printf("jimmy: unable to remove directory: %v", err)
+				log.Printf("unable to remove directory: %v", err)
 			}
 		}
 
 		if err := os.MkdirAll(d, os.ModePerm); err != nil {
-			log.Printf("jimmy: unable to create directory: %v", err)
+			log.Printf("unable to create directory: %v", err)
 		}
 	}
 }
 
-func setUpRepo(target string, opts *options) {
-	mfs := memfs.New()
-	// Clones the given repository in memory, creating the remote, the local
-	// branches and fetching the objects, exactly as:
-	r, err := git.Clone(memory.NewStorage(), mfs, &git.CloneOptions{
-		URL: opts.repo,
-	})
-
-	check(err)
-
-	refs, _ := r.References()
-	refs.ForEach(func(ref *plumbing.Reference) error {
-		bc, err := r.Branch("refs/head/experimental")
-
-		if err != nil {
-			return err
-		}
-
-		log.Printf("reference: %v %v", ref.Type(), ref.Name())
-		log.Printf("branch: %v", bc.Name)
-
-		return nil
-	})
-
-	branches, err := r.Branches()
-
-	check(err)
-
-	// ... retrieves the branch pointed by HEAD
-	// ref, err := r.Head()
-	//
-	// check(err)
-	//
-	// cIter, err := r.Log(&git.LogOptions{From: ref.Hash()})
-	//
-	// check(err)
-
-	// err = cIter.ForEach(func(c *object.Commit) error {
-	// 	// log.Print(c)
-	//
-	// 	return nil
-	// })
-
-	branches.ForEach(func(b *plumbing.Reference) error {
-		log.Printf("branch: %v", b)
-
-		return nil
-	})
-
-	check(err)
-
-	var pathError *fs.PathError
-	repoPath := filepath.Join(target, "repository")
-
-	_, err = os.Stat(repoPath)
-
-	if errors.As(err, &pathError) {
-		localRepo, err := git.PlainClone(repoPath, false, &git.CloneOptions{
-			URL:          opts.repo,
-			SingleBranch: false,
-			NoCheckout:   true,
-			// NOTE: This will screw things up if piping output to a file.
-			// Progress: os.Stdout,
-		})
-
-		commitObjects, err := localRepo.CommitObjects()
-
-		if err != nil {
-			log.Printf("%v", err)
-		}
-
-		var commitList []*object.Commit
-
-		commitObjects.ForEach(func(c *object.Commit) error {
-			commitList = append(commitList, c)
-
-			return nil
-		})
-
-		// it := template.Must(template.New("default").Parse(iTmpl))
-		//
-		// cdata := struct {
-		// 	List  []*object.Commit
-		// 	Title string
-		// }{
-		// 	List:  commitList,
-		// 	Title: opts.project,
-		// }
-		//
-		// if err := it.Execute(os.Stdout, cdata); err != nil {
-		// 	log.Fatalf("jimmy: unable to fill index template: %v", err)
-		// }
-
-		localBranches, err := localRepo.Branches()
-
-		if err != nil {
-			log.Printf("%v", err)
-		}
-
-		var branchList []*plumbing.Reference
-
-		localBranches.ForEach(func(b *plumbing.Reference) error {
-			branchList = append(branchList, b)
-
-			return nil
-		})
-
-		rt := template.Must(template.New("default").Parse(rTmpl))
-
-		rconf, err := localRepo.Config()
-
-		check(err)
-
-		for _, b := range rconf.Branches {
-			log.Print(b.Name)
-		}
-
-		log.Printf("config/branches: %v", rconf.Branches)
-		log.Printf("config/remotes: %v", rconf.Remotes)
-
-		bdata := struct {
-			Description string
-			Link        string
-			List        []*plumbing.Reference
-			Title       string
-		}{
-			Description: "",
-			Link:        opts.link,
-			List:        branchList,
-			Title:       opts.project,
-		}
-
-		if err := rt.Execute(os.Stdout, bdata); err != nil {
-			log.Fatalf("jimmy: unable to fill home template: %v", err)
-		}
-
-		// branch, err := localBranches.Next()
-		//
-		// log.Printf("branch: %v %s", branch.Name(), branch.String())
-		//
-		// if err != nil {
-		// 	log.Printf("jimmy: failed to list branches: %v", err)
-		// }
-		//
-		// ref := plumbing.NewHashReference(branch.Name(), branch.Hash())
-		//
-		// if err != nil {
-		// 	log.Printf("jimmy: failed to create ref: %v", err)
-		// }
-
-		// workTree, err := localRepo.Worktree()
-		//
-		// if err != nil {
-		// 	log.Printf("jimmy: failed to open worktree: %v", err)
-		// }
-		//
-		// err = workTree.Checkout(&git.CheckoutOptions{
-		// 	Hash: ref.Hash(),
-		// })
-		//
-		// if err != nil {
-		// 	log.Printf("jimmy: failed to checkout detached HEAD: %v", err)
-		// }
-		//
-		// err = localRepo.Storer.RemoveReference(ref.Name())
-		//
-		// if err != nil {
-		// 	log.Printf("jimmy: failed to delete branch: %v", err)
-		// }
-	}
-}
-
-// TODO: implement!
-// NOTE: This may not be required, there is no merge calls anywhere.
-func setGitConfig() {
-	/*
-	   # git merge fails if there are not set.  Fake them.
-	   git config user.email "git2html@git2html"
-	   git config user.name "git2html"
-	*/
+func setUpRepo(target string, opt *options) {
 }
 
 // TODO: implement!
@@ -929,10 +661,4 @@ func htmlFooter() {
 	       "<a href=\"http://hssl.cs.jhu.edu/~neal/git2html\">git2html</a>."
 	   }
 	*/
-}
-
-func check(err error) {
-	if err != nil {
-		log.Fatalf("jimmy: %v", err)
-	}
 }
