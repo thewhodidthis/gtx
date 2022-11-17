@@ -23,9 +23,9 @@ var bTmpl string
 var iTmpl string
 
 // https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
-type bflag []string
+type manyflag []string
 
-func (b *bflag) Set(value string) error {
+func (b *manyflag) Set(value string) error {
 	// Make sure there are no duplicates.
 	if !includes(*b, value) {
 		*b = append(*b, value)
@@ -34,12 +34,12 @@ func (b *bflag) Set(value string) error {
 	return nil
 }
 
-func (b *bflag) String() string {
+func (b *manyflag) String() string {
 	return strings.Join(*b, ", ")
 }
 
 type options struct {
-	Branches bflag `json:"branches"`
+	Branches manyflag `json:"branches"`
 	Force    bool  `json:"force"`
 	name     string
 	Project  string `json:"project"`
@@ -141,7 +141,7 @@ func main() {
 			})
 
 			// Don't ask.
-			if s, ok := v.Interface().(bflag); ok {
+			if s, ok := v.Interface().(manyflag); ok {
 				for _, b := range s {
 					flag.Set(f.Name, b)
 				}
@@ -241,7 +241,7 @@ func setUpRepo(target string, opt *options) {
 }
 
 // TODO: implement!
-func cleanUpBranches(branches bflag) []string {
+func cleanUpBranches(branches manyflag) []string {
 	/*
 	   if test x"$BRANCHES" = x
 	   then
