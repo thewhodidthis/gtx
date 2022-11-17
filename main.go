@@ -22,14 +22,28 @@ var bTmpl string
 //go:embed index.html.tmpl
 var iTmpl string
 
+// https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
+type bflag []string
+
+// TODO: Make sure these are unique.
+func (b *bflag) Set(value string) error {
+	*b = append(*b, value)
+
+	return nil
+}
+
+func (b *bflag) String() string {
+	return strings.Join(*b, ", ")
+}
+
 type options struct {
+	Branches bflag `json:"branches"`
+	Force    bool  `json:"force"`
 	name     string
 	Project  string `json:"project"`
+	Quiet    bool   `json:"quiet"`
 	Repo     string `json:"repo"`
 	URL      string `json:"url"`
-	Branches string `json:"branches"`
-	Quiet    bool   `json:"quiet"`
-	Force    bool   `json:"force"`
 }
 
 // Helps store options into a JSON config file.
@@ -66,8 +80,7 @@ func main() {
 	flag.StringVar(&opt.Project, "p", "Jimbo", "Project title")
 	flag.StringVar(&opt.Repo, "r", "", "Target repo")
 	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Repo public URL")
-	// TODO: Allow for passing multiple values.
-	flag.StringVar(&opt.Branches, "b", "all", "Target branches")
+	flag.Var(&opt.Branches, "b", "Target branches")
 	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
 	flag.BoolVar(&opt.Force, "f", false, "Force rebuilding of all pages")
 	flag.Parse()
@@ -90,19 +103,21 @@ func main() {
 		out = filepath.Join(cwd, out)
 	}
 
+	// Create a separate options instance for reading config file values into.
+	store := *opt
+
+	// Need deep copy the underlying slice types.
+	store.Branches = append(store.Branches, opt.Branches...)
+
 	// Attempt to read saved settings.
-	obs, err := os.ReadFile(filepath.Join(out, opt.name))
+	bs, err := os.ReadFile(filepath.Join(out, opt.name))
 
 	if err != nil {
 		log.Printf("unable to read config file: %v", err)
 	}
 
-	// Create a separate options instance for reading config file values into.
-	// NOTE: Need dereference to safely copy.
-	cnf := *opt
-
 	// If a config file exists and an option has not been set, override default to match.
-	if err := json.Unmarshal(obs, &cnf); err != nil {
+	if err := json.Unmarshal(bs, &store); err != nil {
 		log.Printf("unable to parse config file: %v", err)
 	}
 
@@ -114,21 +129,28 @@ func main() {
 		flagset[f.Name] = true
 	})
 
-	ref := reflect.ValueOf(cnf)
+	ref := reflect.ValueOf(store)
 
-	// Log current settings.
 	flag.VisitAll(func(f *flag.Flag) {
+		// Attempt to source settings from config file, then override flag defaults.
 		if !flagset[f.Name] {
-			// Attempt to override default settings where necessary.
 			v := ref.FieldByNameFunc(func(n string) bool {
 				return strings.HasPrefix(strings.ToLower(n), f.Name)
 			})
 
-			// This has the nice side effect of magically overriding `opt` fields.
-			flag.Set(f.Name, v.String())
+			// Don't ask.
+			if s, ok := v.Interface().(bflag); ok {
+				for _, b := range s {
+					flag.Set(f.Name, b)
+				}
+			} else {
+				// This has the welcome side effect of magically overriding `opt` fields.
+				flag.Set(f.Name, v.String())
+			}
 		}
 
-		log.Printf("%v/%v: %v\n", f.Name, f.Usage, f.Value)
+		// Log current settings.
+		log.Printf("%s/%s: %v\n", f.Name, f.Usage, f.Value)
 	})
 
 	// The repo flag is required at this point.
@@ -217,7 +239,7 @@ func setUpRepo(target string, opt *options) {
 }
 
 // TODO: implement!
-func cleanUpBranches(branches string) []string {
+func cleanUpBranches(branches bflag) []string {
 	/*
 	   if test x"$BRANCHES" = x
 	   then
