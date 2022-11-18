@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -20,8 +22,110 @@ var rTmpl string
 //go:embed branch.html.tmpl
 var bTmpl string
 
-//go:embed index.html.tmpl
-var iTmpl string
+//go:embed commit.html.tmpl
+var cTmpl string
+
+type branch struct {
+	Name string
+}
+
+type repo struct {
+	name string
+	path string
+}
+
+func (r *repo) init(f bool) error {
+	dirs := []string{"branch", "commit", "object"}
+
+	for _, dir := range dirs {
+		d := filepath.Join(r.path, dir)
+
+		// Clear existing dirs if force true.
+		if f && dir != "branch" {
+			if err := os.RemoveAll(d); err != nil {
+				return fmt.Errorf("unable to remove directory: %v", err)
+			}
+		}
+
+		if err := os.MkdirAll(d, 0750); err != nil {
+			return fmt.Errorf("unable to create directory: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *repo) clone(target string) error {
+	src := filepath.Join(r.path, "repo")
+	_, err := os.Stat(src)
+
+	if os.IsNotExist(err) {
+		if err := exec.Command("git", "clone", target, src).Run(); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("git", "branch", "-l")
+	cmd.Dir = src
+	out, err := cmd.Output()
+
+	if err != nil {
+		return err
+	}
+
+	all := fmt.Sprintf("%s", out)
+	_, main, found := strings.Cut(all, "*")
+
+	if !found {
+		return fmt.Errorf("unable to locate main branch")
+	}
+
+	main = strings.Trim(main, " ")
+	main = filepath.Join("origin", main)
+
+	log.Printf("main branch found: %v", main)
+
+	// TODO: This don't seem to be working as expected at present, why?
+	cmd = exec.Command("git", "checkout", main)
+	cmd.Dir = src
+	err = cmd.Run()
+
+	if err != nil {
+		return err
+	}
+
+	cmd = exec.Command("git", "branch", "-D", main)
+	cmd.Dir = src
+	err = cmd.Run()
+
+	return err
+}
+
+func (r *repo) listBranches(bf manyflag) ([]branch, error) {
+	// dir := fmt.Sprintf("git -C %s branch", r.repo)
+	cmd := exec.Command("git", "branch", "-a")
+	cmd.Dir = filepath.Join(r.path, "repo")
+
+	out, err := cmd.Output()
+
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: Filter to match options.
+	// TODO: Check if `bf` empty, in which case return all.
+	var branches []branch
+
+	for _, b := range bf {
+		fmt.Printf("want: %s\n", b)
+	}
+
+	fmt.Printf("have: %s", out)
+
+	return branches, nil
+}
 
 // https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
 type manyflag []string
@@ -50,16 +154,18 @@ type options struct {
 }
 
 // Helps store options into a JSON config file.
-func (o *options) save(out string) {
+func (o *options) save(out string) error {
 	bs, err := json.MarshalIndent(o, "", "  ")
 
 	if err != nil {
-		log.Fatalf("unable to encode config file: %v", err)
+		return fmt.Errorf("unable to encode config file: %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(out, o.name), bs, 0644); err != nil {
-		log.Fatalf("unable to save config file: %v", err)
+		return fmt.Errorf("unable to save config file: %v", err)
 	}
+
+	return nil
 }
 
 func init() {
@@ -177,70 +283,52 @@ func main() {
 	}
 
 	// Save current settings for future use.
-	opt.save(out)
-
-	/*
-	   if test ! -d "$REPOSITORY"
-	   then
-	     echo "Repository \"$REPOSITORY\" does not exists.  Misconfiguration likely."
-	     exit 1
-	   fi
-	*/
-	createDirectories(out, opt.Force)
-	setUpRepo(out, opt)
-
-	cleanBranches := cleanUpBranches(opt.Branches)
-
-	fetchBranches(cleanBranches)
-	writeIndex()
-	doTheRealWork()
-	writeIndexFooter()
-}
-
-func createDirectories(target string, force bool) {
-	//# Ensure that some directories we need exist.
-	/*
-	   if test x"$force_rebuild" = x1
-	   then
-	     rm -rf "$TARGET/objects" "$TARGET/commits"
-	   fi
-
-	   if test ! -d "$TARGET/objects"
-	   then
-	     mkdir "$TARGET/objects"
-	   fi
-
-	   if test ! -e "$TARGET/commits"
-	   then
-	     mkdir "$TARGET/commits"
-	   fi
-
-	   if test ! -e "$TARGET/branches"
-	   then
-	     mkdir "$TARGET/branches"
-	   fi
-	*/
-
-	// Repository
-	dirs := []string{"branches", "commits", "objects"}
-
-	for _, dir := range dirs {
-		d := filepath.Join(target, dir)
-
-		// Clear existing dirs if force true.
-		if force && dir != "branches" {
-			if err := os.RemoveAll(d); err != nil {
-				log.Printf("unable to remove directory: %v", err)
-			}
-		}
-
-		if err := os.MkdirAll(d, os.ModePerm); err != nil {
-			log.Printf("unable to create directory: %v", err)
-		}
+	if err := opt.save(out); err != nil {
+		log.Fatalf("unable to save options: %v", err)
 	}
-}
 
-func setUpRepo(target string, opt *options) {
+	repo := &repo{
+		name: opt.Project,
+		path: out,
+	}
+
+	if err := repo.init(opt.Force); err != nil {
+		log.Fatalf("unable to initialize output directory: %v", err)
+	}
+
+	if err := repo.clone(opt.Repo); err != nil {
+		log.Fatalf("unable to clone repo: %v", err)
+	}
+
+	branches, err := repo.listBranches(opt.Branches)
+
+	if err != nil {
+		log.Fatalf("unable to list branches: %v", err)
+	}
+
+	// This is the main index or repo home.
+	ri, err := os.Create(filepath.Join(out, "index.html"))
+
+	defer ri.Close()
+
+	if err != nil {
+		log.Fatalf("unable to create repo index: %v", err)
+	}
+
+	rt := template.Must(template.New("repo").Parse(rTmpl))
+	rd := struct {
+		Branches []branch
+		Link     string
+		Title    string
+	}{
+		Branches: branches,
+		Link:     opt.URL,
+		Title:    opt.Project,
+	}
+
+	if err := rt.Execute(ri, rd); err != nil {
+		log.Fatalf("unable to fill in repo template: %v", err)
+	}
 }
 
 // TODO: implement!
@@ -302,36 +390,6 @@ func fetchBranches(branches []string) {
 	   	   do
 	   	     let ++bcount
 	   	   done
-	*/
-}
-
-// TODO: implement!
-func writeIndex() {
-	/*
-	   INDEX="$TARGET/index.html"
-
-	   {
-	     html_header
-
-	     if test -e "$REPOSITORY/description"
-	     then
-	       echo "<h2>Description</h2>"
-	       cat "$REPOSITORY/description"
-	     fi
-
-	     echo "<h2>Repository</h2>"
-	     if test x"$PUBLIC_REPOSITORY" != x
-	     then
-	       echo  "Clone this repository using:" \
-	         "<pre>" \
-	         " git clone $PUBLIC_REPOSITORY" \
-	         "</pre>"
-	     fi
-
-	     echo "<h2>Branches</h2>" \
-	       "<ul>"
-	   } > "$INDEX"
-
 	*/
 }
 
