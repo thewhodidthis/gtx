@@ -104,7 +104,6 @@ func (r *repo) clone(target string) error {
 }
 
 func (r *repo) listBranches(bf manyflag) ([]branch, error) {
-	// dir := fmt.Sprintf("git -C %s branch", r.repo)
 	cmd := exec.Command("git", "branch", "-a")
 	cmd.Dir = filepath.Join(r.path, "repo")
 
