@@ -55,7 +55,7 @@ func (r *repo) init(f bool) error {
 	return nil
 }
 
-func (r *repo) clone(target string) error {
+func (r *repo) save(target string) error {
 	src := filepath.Join(r.path, "repo")
 	_, err := os.Stat(src)
 
@@ -67,6 +67,7 @@ func (r *repo) clone(target string) error {
 		return err
 	}
 
+	// NOTE: Maybe the following ought to be a separate method.
 	cmd := exec.Command("git", "branch", "-l")
 	cmd.Dir = src
 	out, err := cmd.Output()
@@ -76,19 +77,21 @@ func (r *repo) clone(target string) error {
 	}
 
 	all := fmt.Sprintf("%s", out)
+
+	// NOTE: Requires go1.18.
 	_, main, found := strings.Cut(all, "*")
 
 	if !found {
 		return fmt.Errorf("unable to locate main branch")
 	}
 
-	main = strings.Trim(main, " ")
-	main = filepath.Join("origin", main)
+	main = strings.TrimSpace(main)
+	main = strings.TrimRight(main, "\n")
 
-	log.Printf("main branch found: %v", main)
+	// NOTE: Not sure why this is added in the original.
+	// main = filepath.Join("origin", main)
 
-	// TODO: This don't seem to be working as expected at present, why?
-	cmd = exec.Command("git", "checkout", main)
+	cmd = exec.Command("git", "checkout", "--detach", main)
 	cmd.Dir = src
 	err = cmd.Run()
 
@@ -295,8 +298,9 @@ func main() {
 		log.Fatalf("unable to initialize output directory: %v", err)
 	}
 
-	if err := repo.clone(opt.Repo); err != nil {
-		log.Fatalf("unable to clone repo: %v", err)
+	// Get an up to date copy.
+	if err := repo.save(opt.Repo); err != nil {
+		log.Fatalf("unable to set up repo: %v", err)
 	}
 
 	branches, err := repo.listBranches(opt.Branches)
