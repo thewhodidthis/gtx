@@ -1,3 +1,7 @@
 https://shafiul.github.io//gitbook/1_the_git_object_model.html
 http://hssl.cs.jhu.edu/~neal/git2html/
 http://walfield.org
+
+Missing features:
+- git-blame support
+- plugins
