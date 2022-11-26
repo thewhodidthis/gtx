@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"text/tabwriter"
 )
 
-//go:embed repo.html.tmpl
+//go:embed home.html.tmpl
 var rTmpl string
 
 //go:embed branch.html.tmpl
@@ -27,85 +28,10 @@ var bTmpl string
 //go:embed commit.html.tmpl
 var cTmpl string
 
-type branch struct {
-	Name string
-}
-
 type repo struct {
 	name string
+	base string
 	path string
-}
-
-func (r *repo) init(f bool) error {
-	dirs := []string{"branch", "commit", "object"}
-
-	for _, dir := range dirs {
-		d := filepath.Join(r.path, dir)
-
-		// Clear existing dirs if force true.
-		if f && dir != "branch" {
-			if err := os.RemoveAll(d); err != nil {
-				return fmt.Errorf("unable to remove directory: %v", err)
-			}
-		}
-
-		if err := os.MkdirAll(d, 0750); err != nil {
-			return fmt.Errorf("unable to create directory: %v", err)
-		}
-	}
-
-	return nil
-}
-
-func (r *repo) save(target string) error {
-	src := filepath.Join(r.path, "repo")
-	_, err := os.Stat(src)
-
-	if os.IsNotExist(err) {
-		if err := exec.Command("git", "clone", target, src).Run(); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-
-	// NOTE: Maybe the following ought to be a separate method.
-	cmd := exec.Command("git", "branch", "-l")
-	cmd.Dir = src
-	out, err := cmd.Output()
-
-	if err != nil {
-		return err
-	}
-
-	all := fmt.Sprintf("%s", out)
-
-	// NOTE: Requires go1.18.
-	_, main, found := strings.Cut(all, "*")
-
-	if !found {
-		return fmt.Errorf("unable to locate main branch")
-	}
-
-	main = strings.TrimSpace(main)
-	main = strings.TrimRight(main, "\n")
-
-	// NOTE: Not sure why this is added in the original.
-	// main = filepath.Join("origin", main)
-
-	cmd = exec.Command("git", "checkout", "--detach", main)
-	cmd.Dir = src
-	err = cmd.Run()
-
-	if err != nil {
-		return err
-	}
-
-	cmd = exec.Command("git", "branch", "-D", main)
-	cmd.Dir = src
-	err = cmd.Run()
-
-	return err
 }
 
 // https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
@@ -246,16 +172,18 @@ func main() {
 	tab.Flush()
 
 	// The repo flag is required at this point.
-	// NOTE: Being able to handle non-local repos would be nice.
-	if ok := filepath.IsAbs(opt.Repo); !ok {
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	// Option considered repo-like if it contains a hidden `.git` dir.
-	if _, err := os.Stat(filepath.Join(opt.Repo, ".git")); os.IsNotExist(err) {
-		flag.Usage()
-		os.Exit(1)
+	if ok := filepath.IsAbs(opt.Repo); ok {
+		// Option considered repo-like if it contains a hidden `.git` dir.
+		if _, err := os.Stat(filepath.Join(opt.Repo, ".git")); os.IsNotExist(err) {
+			flag.Usage()
+			os.Exit(1)
+		}
+	} else {
+		// Allow for URL-looking non-local repos.
+		if _, err := url.ParseRequestURI(opt.Repo); err != nil {
+			flag.Usage()
+			os.Exit(1)
+		}
 	}
 
 	// Make sure `out` exists.
@@ -270,7 +198,9 @@ func main() {
 
 	repo := &repo{
 		name: opt.Project,
-		path: out,
+		base: out,
+		// TODO: Change to a temporary directory.
+		path: filepath.Join(out, "repo"),
 	}
 
 	if err := repo.init(opt.Force); err != nil {
@@ -282,10 +212,31 @@ func main() {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	branches, err := findBranches(repo, opt.Branches)
+	branches, err := repo.findBranches(opt.Branches)
 
 	if err != nil {
-		log.Fatalf("unable to list branches: %v", err)
+		log.Fatalf("unable to filter branches: %v", err)
+	}
+
+	for _, b := range branches {
+		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
+
+		cmd := exec.Command("git", "fetch", "--force", "origin", ref)
+		cmd.Dir = repo.path
+
+		if _, err := cmd.Output(); err != nil {
+			log.Printf("unable to fetch branch: %v", err)
+
+			continue
+		}
+	}
+
+	// NOTE: Why is this even necessary?
+	cmd := exec.Command("git", "checkout", filepath.Join("origin", branches[0]))
+	cmd.Dir = repo.path
+
+	if err := cmd.Run(); err != nil {
+		log.Printf("unable to checkout default branch: %v", err)
 	}
 
 	// This is the main index or repo home.
@@ -313,41 +264,80 @@ func main() {
 	}
 }
 
-// TODO: implement!
-func updateBranches(r *repo, branches []string) int {
-	/*
-	   	   for branch in $BRANCHES
-	   	   do
-	   	     # Suppress already up to date status messages, but don't use grep -v
-	   	     # as that returns 1 if there is no output and causes the script to
-	   	     # abort.
-	   	     git fetch --force origin "refs/heads/${branch}:refs/origin/${branch}" \
-	   	         | gawk '/^Already up-to-date[.]$/ { skip=1; }
-	   	                 { if (! skip) print; skip=0 }'
-	   	   done
-	   	   git checkout "origin/$first"
-	      }
+func (r *repo) init(f bool) error {
+	dirs := []string{"branch", "commit", "object"}
 
-	   	   # For each branch and each commit create and extract an archive of the form
-	   	   #   $TARGET/commits/$commit
-	   	   #
-	   	   # and a link:
-	   	   #
-	   	   #   $TARGET/branches/$commit -> $TARGET/commits/$commit
+	for _, dir := range dirs {
+		d := filepath.Join(r.base, dir)
 
-	   	   # Count the number of branch we want to process to improve reporting.
-	   	   bcount=0
-	   	   for branch in $BRANCHES
-	   	   do
-	   	     let ++bcount
-	   	   done
-	*/
-	return 0
+		// Clear existing dirs if force true.
+		if f && dir != "branch" {
+			if err := os.RemoveAll(d); err != nil {
+				return fmt.Errorf("unable to remove directory: %v", err)
+			}
+		}
+
+		if err := os.MkdirAll(d, 0750); err != nil {
+			return fmt.Errorf("unable to create directory: %v", err)
+		}
+	}
+
+	return nil
 }
 
-func findBranches(r *repo, bf manyflag) ([]string, error) {
+func (r *repo) save(target string) error {
+	_, err := os.Stat(r.path)
+
+	if os.IsNotExist(err) {
+		if err := exec.Command("git", "clone", target, r.path).Run(); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
+	// NOTE: Should this be in a separate method.
+	cmd := exec.Command("git", "branch", "-l")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+
+	if err != nil {
+		return err
+	}
+
+	all := fmt.Sprintf("%s", out)
+
+	// NOTE: Requires go1.18.
+	_, star, found := strings.Cut(all, "*")
+
+	if !found {
+		return fmt.Errorf("unable to locate the default branch")
+	}
+
+	star = strings.TrimSpace(star)
+	star = strings.TrimRight(star, "\n")
+
+	// NOTE: Not sure why this is added in the original.
+	// star = filepath.Join("origin", star)
+
+	cmd = exec.Command("git", "checkout", "--detach", star)
+	cmd.Dir = r.path
+	err = cmd.Run()
+
+	if err != nil {
+		return err
+	}
+
+	cmd = exec.Command("git", "branch", "-D", star)
+	cmd.Dir = r.path
+	err = cmd.Run()
+
+	return err
+}
+
+func (r *repo) findBranches(bf manyflag) ([]string, error) {
 	cmd := exec.Command("git", "branch", "-a")
-	cmd.Dir = filepath.Join(r.path, "repo")
+	cmd.Dir = r.path
 
 	out, err := cmd.Output()
 
