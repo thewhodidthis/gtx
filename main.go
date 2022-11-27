@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
@@ -19,14 +20,17 @@ import (
 	"text/tabwriter"
 )
 
-//go:embed home.html.tmpl
-var rTmpl string
-
 //go:embed branch.html.tmpl
 var bTmpl string
 
+//go:embed home.html.tmpl
+var rTmpl string
+
 //go:embed commit.html.tmpl
 var cTmpl string
+
+//go:embed diff.html.tmpl
+var dTmpl string
 
 type repo struct {
 	name string
@@ -51,13 +55,13 @@ func (f *manyflag) String() string {
 }
 
 type options struct {
-	name     string
 	Branches manyflag `json:"branches"`
 	Force    bool     `json:"force"`
 	Project  string   `json:"project"`
 	Quiet    bool     `json:"quiet"`
 	Repo     string   `json:"repo"`
 	URL      string   `json:"url"`
+	config   string
 }
 
 // Helps store options into a JSON config file.
@@ -68,7 +72,7 @@ func (o *options) save(out string) error {
 		return fmt.Errorf("unable to encode config file: %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(out, o.name), bs, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(out, o.config), bs, 0644); err != nil {
 		return fmt.Errorf("unable to save config file: %v", err)
 	}
 
@@ -85,18 +89,18 @@ func init() {
 
 	// Swap default logger timestamps for a custom prefix.
 	log.SetFlags(log.Lmsgprefix)
-	log.SetPrefix("jimmy: ")
+	log.SetPrefix("gtx: ")
 }
 
 func main() {
 	opt := &options{
-		name: ".jimmy.json",
+		config: ".jimmy.json",
 	}
 
 	flag.StringVar(&opt.Project, "p", "Jimbo", "Project title")
 	flag.StringVar(&opt.Repo, "r", "", "Target repo")
-	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Repo public URL")
 	flag.Var(&opt.Branches, "b", "Target branches")
+	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Repo public URL")
 	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
 	flag.BoolVar(&opt.Force, "f", false, "Force rebuild")
 	flag.Parse()
@@ -126,7 +130,7 @@ func main() {
 	store.Branches = append(store.Branches, opt.Branches...)
 
 	// Attempt to read saved settings.
-	bs, err := os.ReadFile(filepath.Join(out, opt.name))
+	bs, err := os.ReadFile(filepath.Join(out, opt.config))
 
 	if err != nil {
 		log.Printf("unable to read config file: %v", err)
@@ -166,7 +170,7 @@ func main() {
 			}
 		}
 
-		fmt.Fprintf(tab, "jimmy: -%s \t%s\t: %v\n", f.Name, f.Usage, f.Value)
+		fmt.Fprintf(tab, "gtx: -%s \t%s\t: %v\n", f.Name, f.Usage, f.Value)
 	})
 
 	tab.Flush()
@@ -196,11 +200,22 @@ func main() {
 		log.Fatalf("unable to save options: %v", err)
 	}
 
+	ucd, err := os.UserCacheDir()
+
+	if err != nil {
+		log.Fatalf("unable to locate user cache folder: %s", err)
+	}
+
+	p, err := ioutil.TempDir(ucd, "gtx-*")
+
+	if err != nil {
+		log.Fatalf("unable to locate temporary host dir: %s", err)
+	}
+
 	repo := &repo{
-		name: opt.Project,
 		base: out,
-		// TODO: Change to a temporary directory.
-		path: filepath.Join(out, "repo"),
+		name: opt.Project,
+		path: p,
 	}
 
 	if err := repo.init(opt.Force); err != nil {
@@ -248,7 +263,7 @@ func main() {
 		log.Fatalf("unable to create repo index: %v", err)
 	}
 
-	rt := template.Must(template.New("repo").Parse(rTmpl))
+	rt := template.Must(template.New("home").Parse(rTmpl))
 	rd := struct {
 		Branches []string
 		Link     string
@@ -288,11 +303,7 @@ func (r *repo) init(f bool) error {
 func (r *repo) save(target string) error {
 	_, err := os.Stat(r.path)
 
-	if os.IsNotExist(err) {
-		if err := exec.Command("git", "clone", target, r.path).Run(); err != nil {
-			return err
-		}
-	} else if err != nil {
+	if err := exec.Command("git", "clone", target, r.path).Run(); err != nil {
 		return err
 	}
 
@@ -363,7 +374,7 @@ func (r *repo) findBranches(bf manyflag) ([]string, error) {
 
 	// Filter to match options, but return all if no branch flags given.
 	if len(bf) > 0 {
-		for k, _ := range branch {
+		for k := range branch {
 			branch[k] = contains(bf, k)
 		}
 	}
