@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
@@ -206,7 +205,7 @@ func main() {
 		log.Fatalf("unable to locate user cache folder: %s", err)
 	}
 
-	p, err := ioutil.TempDir(ucd, "gtx-*")
+	p, err := os.MkdirTemp(ucd, "gtx-*")
 
 	if err != nil {
 		log.Fatalf("unable to locate temporary host dir: %s", err)
