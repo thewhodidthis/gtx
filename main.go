@@ -17,7 +17,11 @@ import (
 	"reflect"
 	"strings"
 	"text/tabwriter"
+	"time"
 )
+
+// For separating out commit line items.
+const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
 
 //go:embed branch.html.tmpl
 var bTmpl string
@@ -31,10 +35,33 @@ var cTmpl string
 //go:embed diff.html.tmpl
 var dTmpl string
 
-type repo struct {
-	name string
+type repository struct {
 	base string
+	name string
 	path string
+}
+
+type branch struct {
+	Commits []*commit
+	Name    string
+}
+
+func (b branch) String() string {
+	return b.Name
+}
+
+type commit struct {
+	Graph   string
+	Hash    string
+	Author  author
+	Date    time.Time
+	Parent  string
+	Subject string
+}
+
+type author struct {
+	Email string
+	Name  string
 }
 
 // https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
@@ -55,12 +82,12 @@ func (f *manyflag) String() string {
 
 type options struct {
 	Branches manyflag `json:"branches"`
-	Force    bool     `json:"force"`
-	Project  string   `json:"project"`
-	Quiet    bool     `json:"quiet"`
-	Repo     string   `json:"repo"`
-	URL      string   `json:"url"`
 	config   string
+	Force    bool   `json:"force"`
+	Project  string `json:"project"`
+	Quiet    bool   `json:"quiet"`
+	Repo     string `json:"repo"`
+	URL      string `json:"url"`
 }
 
 // Helps store options into a JSON config file.
@@ -205,13 +232,13 @@ func main() {
 		log.Fatalf("unable to locate user cache folder: %s", err)
 	}
 
-	p, err := os.MkdirTemp(ucd, "gtx-*")
+	p, err := os.MkdirTemp(ucd, "gtx")
 
 	if err != nil {
 		log.Fatalf("unable to locate temporary host dir: %s", err)
 	}
 
-	repo := &repo{
+	repo := &repository{
 		base: out,
 		name: opt.Project,
 		path: p,
@@ -226,12 +253,13 @@ func main() {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	branches, err := repo.findBranches(opt.Branches)
+	branches, err := repo.branchfinder(opt.Branches)
 
 	if err != nil {
 		log.Fatalf("unable to filter branches: %v", err)
 	}
 
+	// Update each branch.
 	for _, b := range branches {
 		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
 
@@ -245,8 +273,37 @@ func main() {
 		}
 	}
 
+	for _, b := range branches {
+		c, err := repo.commitparser(b.Name)
+
+		if err != nil {
+			log.Printf("unable to parse %s commit objects: %v", b, err)
+
+			continue
+		}
+
+		b.Commits = c
+	}
+
+	for _, b := range branches {
+		f, err := os.Create(filepath.Join(out, fmt.Sprintf("%s.html", b)))
+
+		defer f.Close()
+
+		if err != nil {
+			log.Fatalf("unable to create branch index: %v", err)
+		}
+
+		t := template.Must(template.New("branch").Parse(bTmpl))
+
+		if err := t.Execute(f, b); err != nil {
+			log.Fatalf("unable to apply branch template: %v", err)
+		}
+	}
+
 	// NOTE: Why is this even necessary?
-	cmd := exec.Command("git", "checkout", filepath.Join("origin", branches[0]))
+	top := branches[0]
+	cmd := exec.Command("git", "checkout", filepath.Join("origin", top.Name))
 	cmd.Dir = repo.path
 
 	if err := cmd.Run(); err != nil {
@@ -259,32 +316,32 @@ func main() {
 	defer ri.Close()
 
 	if err != nil {
-		log.Fatalf("unable to create repo index: %v", err)
+		log.Fatalf("unable to create home: %v", err)
 	}
 
 	rt := template.Must(template.New("home").Parse(rTmpl))
 	rd := struct {
-		Branches []string
+		Branches []*branch
 		Link     string
-		Title    string
+		Project  string
 	}{
 		Branches: branches,
 		Link:     opt.URL,
-		Title:    opt.Project,
+		Project:  opt.Project,
 	}
 
 	if err := rt.Execute(ri, rd); err != nil {
-		log.Fatalf("unable to fill in repo template: %v", err)
+		log.Fatalf("unable to apply home template: %v", err)
 	}
 }
 
-func (r *repo) init(f bool) error {
+func (r *repository) init(f bool) error {
 	dirs := []string{"branch", "commit", "object"}
 
 	for _, dir := range dirs {
 		d := filepath.Join(r.base, dir)
 
-		// Clear existing dirs if force true.
+		// Clear existing dirs when -force true.
 		if f && dir != "branch" {
 			if err := os.RemoveAll(d); err != nil {
 				return fmt.Errorf("unable to remove directory: %v", err)
@@ -299,14 +356,14 @@ func (r *repo) init(f bool) error {
 	return nil
 }
 
-func (r *repo) save(target string) error {
+func (r *repository) save(target string) error {
 	_, err := os.Stat(r.path)
 
 	if err := exec.Command("git", "clone", target, r.path).Run(); err != nil {
 		return err
 	}
 
-	// NOTE: Should this be in a separate method.
+	// NOTE: Should this be in a separate method?
 	cmd := exec.Command("git", "branch", "-l")
 	cmd.Dir = r.path
 	out, err := cmd.Output()
@@ -345,7 +402,7 @@ func (r *repo) save(target string) error {
 	return err
 }
 
-func (r *repo) findBranches(bf manyflag) ([]string, error) {
+func (r *repository) branchfinder(bf manyflag) ([]*branch, error) {
 	cmd := exec.Command("git", "branch", "-a")
 	cmd.Dir = r.path
 
@@ -355,8 +412,8 @@ func (r *repo) findBranches(bf manyflag) ([]string, error) {
 		return nil, err
 	}
 
-	var result []string
-	var branch = make(map[string]bool)
+	var results []*branch
+	var m = make(map[string]bool)
 
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 
@@ -364,7 +421,7 @@ func (r *repo) findBranches(bf manyflag) ([]string, error) {
 		t := strings.TrimSpace(scanner.Text())
 		_, f := filepath.Split(t)
 
-		branch[f] = !strings.Contains(f, "HEAD")
+		m[f] = !strings.Contains(f, "HEAD")
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -373,330 +430,61 @@ func (r *repo) findBranches(bf manyflag) ([]string, error) {
 
 	// Filter to match options, but return all if no branch flags given.
 	if len(bf) > 0 {
-		for k := range branch {
-			branch[k] = contains(bf, k)
+		for k := range m {
+			m[k] = contains(bf, k)
 		}
 	}
 
 	// Transfer desired branch names to resulting slice.
-	for k, v := range branch {
+	for k, v := range m {
 		if v {
-			result = append(result, k)
+			results = append(results, &branch{Name: k})
 		}
 	}
 
-	return result, nil
+	return results, nil
 }
 
-// TODO: implement!
-func doTheRealWork() {
-	/*
-	   b=0
-	   for branch in $BRANCHES
-	   do
-	     let ++b
+func (r *repository) commitparser(b string) ([]*commit, error) {
+	fst := strings.Join([]string{"%H", "%P", "%s", "%aN", "%aE", "%aD"}, SEP)
+	ref := fmt.Sprintf("origin/%s", b)
 
-	     cd "$TARGET/repository"
+	cmd := exec.Command("git", "log", fmt.Sprintf("--format=%s", fst), ref)
+	cmd.Dir = r.path
 
-	     COMMITS=$(mktemp)
-	     git rev-list --graph "origin/$branch" > $COMMITS
+	out, err := cmd.Output()
 
-	     # Count the number of commits on this branch to improve reporting.
-	     ccount=$(egrep '[0-9a-f]' < $COMMITS | wc -l)
+	if err != nil {
+		return nil, err
+	}
 
-	     progress "Branch $branch ($b/$bcount): processing ($ccount commits)."
+	results := []*commit{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
 
-	     BRANCH_INDEX="$TARGET/branches/$branch.html"
+	for scanner.Scan() {
+		data := strings.Split(scanner.Text(), SEP)
 
-	     c=0
-	     while read -r commitline
-	     do
-	       # See http://www.itnewb.com/unicode
-	       graph=$(echo "$commitline" \
-	               | sed 's/ [0-9a-f]*$//; s/|/\&#x2503;/g; s/[*]/\&#x25CF;/g;
-	                      s/[\]/\&#x2B0A;/g; s/\//\&#x2B0B;/g;')
-	*/
-	//    commit=$(echo "$commitline" | sed 's/^[^0-9a-f]*//')
-	/*
-	     if test x"$commit" = x
-	     then
-	       # This is just a bit of graph.  Add it to the branch's
-	       # index.html and then go to the next commit.
-	       echo "<tr><td valign=\"middle\"><pre>$graph</pre></td><td></td><td></td><td></td></tr>" \
-	   >> "$BRANCH_INDEX"
-	       continue
-	     fi
+		a := author{data[4], data[3]}
+		d, err := time.Parse(time.RFC1123Z, data[5])
 
-	     let ++c
-	     progress "Commit $commit ($c/$ccount): processing."
+		if err != nil {
+			continue
+		}
 
-	     # Extract metadata about this commit.
-	     metadata=$(git log -n 1 --pretty=raw $commit \
-	         | sed 's#<#\&lt;#g; s#>#\&gt;#g; ')
-	     parent=$(echo "$metadata" \
-	   | gawk '/^parent / { $1=""; sub (" ", ""); print $0 }')
-	     author=$(echo "$metadata" \
-	   | gawk '/^author / { NF=NF-2; $1=""; sub(" ", ""); print $0 }')
-	     date=$(echo "$metadata" | gawk '/^author / { print $(NF=NF-1); }')
-	     date=$(date -u -d "1970-01-01 $date sec")
-	     log=$(echo "$metadata" | gawk '/^    / { if (!done) print $0; done=1; }')
-	     loglong=$(echo "$metadata" | gawk '/^    / { print $0; }')
+		c := &commit{
+			Author:  a,
+			Date:    d,
+			Hash:    data[0],
+			Parent:  data[1],
+			Subject: data[2],
+		}
 
-	     if test "$c" = "1"
-	     then
-	       # This commit is the current head of the branch.  Update the
-	       # branch's link, but don't use ln -sf: because the symlink is to
-	       # a directory, the symlink won't be replaced; instead, the new
-	       # link will be created in the existing symlink's target
-	       # directory:
-	       #
-	       #   $ mkdir foo
-	       #   $ ln -s foo bar
-	       #   $ ln -s baz bar
-	       #   $ ls -ld bar bar/baz
-	       #   lrwxrwxrwx 1 neal neal 3 Aug  3 09:14 bar -> foo
-	       #   lrwxrwxrwx 1 neal neal 3 Aug  3 09:14 bar/baz -> baz
-	       rm -f "$TARGET/branches/$branch"
-	       ln -s "../commits/$commit" "$TARGET/branches/$branch"
+		results = append(results, c)
+	}
 
-	       # Update the project's index.html and the branch's index.html.
-	       echo "<li><a href=\"branches/$branch.html\">$branch</a>: " \
-	         "<b>$log</b> $author <i>$date</i>" >> "$INDEX"
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 
-	       {
-	         html_header "Branch: $branch" ".."
-	   echo "<p><a href=\"$branch/index.html\">HEAD</a>"
-	         echo "<p><table>"
-	       } > "$BRANCH_INDEX"
-	     fi
-
-	     # Add this commit to the branch's index.html.
-	     echo "<tr><td valign=\"middle\"><pre>$graph</pre></td><td><a href=\"../commits/$commit/index.html\">$log</a></td><td>$author</td><td><i>$date</i></td></tr>" \
-	   >> "$BRANCH_INDEX"
-
-
-	     # Commits don't change.  If the directory already exists, it is up
-	     # to date and we can save some work.
-	     COMMIT_BASE="$TARGET/commits/$commit"
-	     if test -e "$COMMIT_BASE"
-	     then
-	       progress "Commit $commit ($c/$ccount): already processed."
-	       continue
-	     fi
-
-	     mkdir "$COMMIT_BASE"
-
-	     # Get the list of files in this commit.
-	     FILES=$(mktemp)
-	     git ls-tree -r "$commit" > "$FILES"
-
-	     # Create the commit's index.html: the metadata, a summary of the changes
-	     # and a list of all the files.
-	     COMMIT_INDEX="$COMMIT_BASE/index.html"
-	     {
-	       html_header "Commit: $commit" "../.."
-
-	       # The metadata.
-	       echo "<h2>Branch: <a href=\"../../branches/$branch.html\">$branch</a></h2>" \
-	   "<p>Author: $author" \
-	   "<br>Date: $date" \
-	         "<br>Commit: $commit"
-	       for p in $parent
-	       do
-	         echo "<br>Parent: <a href=\"../../commits/$p/index.html\">$p</a>" \
-	   " (<a href=\"../../commits/$commit/diff-to-$p.html\">diff to parent</a>)"
-	       done
-	       echo "<br>Log message:" \
-	   "<p><pre>$loglong</pre>"
-	       for p in $parent
-	       do
-	   echo "<br>Diff Stat to $p:" \
-	     "<blockquote><pre>"
-	         git diff --stat $p..$commit \
-	           | gawk \
-	               '{ if (last_line) print last_line;
-	                  last_line_raw=$0;
-	                  $1=sprintf("<a href=\"%s.raw.html\">%s</a>" \
-	                             " (<a href=\"../../commits/'"$p"'/%s.raw.html\">old</a>)" \
-	                             "%*s" \
-	                             "(<a href=\"diff-to-'"$p"'.html#%s\">diff</a>)",
-	                             $1, $1, $1, 60 - length ($1), " ", $1);
-	                     last_line=$0; }
-	                   END { print last_line_raw; }'
-	         echo "</pre></blockquote>"
-	       done
-	       echo "<p>Files:" \
-	         "<ul>"
-
-	       # The list of files as a hierarchy.  Sort them so that within a
-	       # directory, files preceed sub-directories
-	       sed 's/\([^ \t]\+[ \t]\)\{3\}//;
-	*/
-	//                 s#^#/#; s#/\([^/]*/\)#/1\1#; s#/\([^/]*\)$#/0\1#;' \
-	/*
-	         < "$FILES" \
-	   | sort | sed 's#/[01]#/#g; s#^/##' \
-	   | gawk '
-	          function spaces(l) {
-	            for (space = 1; space <= l; space ++) { printf ("  "); }
-	          }
-	          function max(a, b) { if (a > b) { return a; } return b; }
-	          function min(a, b) { if (a < b) { return a; } return b; }
-	          function join(array, sep, i, s) {
-	            s="";
-	            for (i in array) {
-	              if (s == "")
-	                s = array[i];
-	              else
-	                s = s sep array[i];
-	            }
-	            return s;
-	          }
-	          BEGIN {
-	            current_components[1] = "";
-	            delete current_components[1];
-	          }
-	          {
-	            file=$0;
-	            split(file, components, "/")
-	            # Remove the file.  Keep the directories.
-	            file=components[length(components)]
-	            delete components[length(components)];
-
-	            # See if a path component changed.
-	            for (i = 1;
-	                 i <= min(length(components), length(current_components));
-	                 i ++)
-	            {
-	              if (current_components[i] != components[i])
-	                # It did.
-	                break
-	            }
-	            # i-1 is the last common component.  The rest from the
-	            # current_component stack.
-	            last=length(current_components);
-	            for (j = last; j >= i; j --)
-	            {
-	              spaces(j);
-	              printf ("</ul> <!-- %s -->\n", current_components[j]);
-	              delete current_components[j];
-	            }
-
-	            # If there are new path components push them on the
-	            # current_component stack.
-	            for (; i <= length(components); i ++)
-	            {
-	                current_components[i] = components[i];
-	                spaces(i);
-	                printf("<li><a name=\"files:%s\">%s</a>\n",
-	                       join(current_components, "/"), components[i]);
-	                spaces(i);
-	                printf("<ul>\n");
-	            }
-
-	            spaces(length(current_components))
-	            printf ("<li><a name=\"files:%s\" href=\"%s.raw.html\">%s</a>\n",
-	                    $0, $0, file);
-	            printf ("  (<a href=\"%s\">raw</a>)\n", $0, file);
-	          }
-	          END {
-	            for (i = length(current_components); j >= 1; j --)
-	            {
-	              spaces(j);
-	              printf ("</ul> <!-- %s -->\n", current_components[j]);
-	              delete current_components[j];
-	            }
-	          }'
-
-	     echo "</ul>"
-	     html_footer
-	   } > "$COMMIT_INDEX"
-
-	   # Create the commit's diff-to-parent.html file.
-	   for p in $parent
-	   do
-	     {
-	*/
-	//        html_header "diff $(echo $commit | sed 's/^\(.\{8\}\).*/\1/') $(echo $p | sed 's/^\(.\{8\}\).*/\1/')" "../.."
-	/*
-	           echo "<h2>Branch: <a href=\"../../branches/$branch.html\">$branch</a></h2>" \
-	             "<h3>Commit: <a href=\"index.html\">$commit</a></h3>" \
-	       "<p>Author: $author" \
-	       "<br>Date: $date" \
-	       "<br>Parent: <a href=\"../$p/index.html\">$p</a>" \
-	       "<br>Log message:" \
-	       "<p><pre>$loglong</pre>" \
-	       "<p>" \
-	             "<pre>"
-	           git diff -p $p..$commit \
-	             | sed 's#<#\&lt;#g; s#>#\&gt;#g;
-	                    s#^\(diff --git a/\)\([^ ]\+\)#\1<a name="\2">\2</a>#;
-	                    s#^\(\(---\|+++\|index\|diff\|deleted\|new\) .\+\)$#<b>\1</b>#;
-	                    s#^\(@@ .\+\)$#<font color=\"blue\">\1</font>#;
-	                    s#^\(-.*\)$#<font color=\"red\">\1</font>#;
-	                    s#^\(+.*\)$#<font color=\"green\">\1</font>#;' \
-	             | gawk '{ ++line; printf("%5d: %s\n", line, $0); }'
-	           echo "</pre>"
-	           html_footer
-	         } > "$COMMIT_BASE/diff-to-$p.html"
-	       done
-
-
-	       # For each file in the commit, ensure the object exists.
-	       while read -r line
-	       do
-	         file_base=$(echo "$line" | gawk '{ print $4 }')
-	         file="$TARGET/commits/$commit/$file_base"
-	         sha=$(echo "$line" | gawk '{ print $3 }')
-
-	         object_dir="$TARGET/objects/"$(echo "$sha" \
-	       | sed 's#^\([a-f0-9]\{2\}\).*#\1#')
-	         object="$object_dir/$sha"
-
-	         if test ! -e "$object"
-	         then
-	           # File does not yet exists in the object repository.
-	           # Create it.
-	     if test ! -d "$object_dir"
-	     then
-	       mkdir "$object_dir"
-	     fi
-
-	           # The object's file should not be commit or branch specific:
-	           # the same html is shared among all files with the same
-	           # content.
-	           {
-	             html_header "$sha"
-	             echo "<pre>"
-	             git show "$sha" \
-	               | sed 's#<#\&lt;#g; s#>#\&gt;#g; ' \
-	               | gawk '{ ++line; printf("%6d: %s\n", line, $0); }'
-	             echo "</pre>"
-	             html_footer
-	           } > "$object"
-	         fi
-
-	         # Create a hard link to the formatted file in the object repository.
-	         mkdir -p $(dirname "$file")
-	         ln "$object" "$file.raw.html"
-
-	         # Create a hard link to the raw file.
-	         raw_filename="raw/$(echo "$sha" | sed 's/^\(..\)/\1\//')"
-	         if ! test -e "$raw_filename"
-	         then
-	       mkdir -p "$(dirname "$raw_filename")"
-	       git cat-file blob "$sha" > $raw_filename
-	         fi
-	         ln "$raw_filename" "$file"
-	       done <"$FILES"
-	       rm -f "$FILES"
-	     done <$COMMITS
-	     rm -f $COMMITS
-
-	     {
-	       echo "</table>"
-	       html_footer
-	     } >> "$BRANCH_INDEX"
-	   done
-	*/
+	return results, nil
 }
