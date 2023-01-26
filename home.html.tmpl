@@ -15,7 +15,7 @@
       {{- with $list := .Branches}}
       <h2>Branches</h2>
       {{- range $list}}
-      <details>
+      <details open>
         <summary><a href="/branch/{{.Name}}/">{{.Name}}</a></summary>
         {{- with and (len .Commits) (index .Commits 0) }}
         <dl>
