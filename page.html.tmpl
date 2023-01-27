@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{.Title}}</title>
+    <style>
+      html {
+        font: medium/normal serif;
+      }
+      caption {
+        caption-side: bottom;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1><a href="/">{{with .Data.Project}}{{.}}{{else}}Home{{end}}</a></h1>
+      {{- range .Data.Breadcrumbs}}
+        <span>{{.}}</span>
+      {{- end}}
+    </header>
+    <main>
+      <hr>
+      {{- with .Data.Link}}
+      <h2>Repository</h2>
+      <p>Clone this repo using: <code>git clone {{.}}</code></p>
+      {{- end}}
+
+      {{- with $list := .Data.Branches}}
+      <h2>Branches</h2>
+      {{- range $list}}
+      <details open>
+        <summary><a href="/branch/{{.Name}}/">{{.Name}}</a></summary>
+        {{- with and (len .Commits) (index .Commits 0) }}
+        <dl>
+          <dt>Subject</dt>
+          <dd>{{.Subject}}</dd>
+          <dt>Author</dt>
+          <dd>{{.Author.Name}} <{{.Author.Email}}></dd>
+          <dt>Date</dt>
+          <dd>
+            <time datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "Jan. 02 '06 15:04:05"}}</time>
+          </dd>
+        </dl>
+        {{- end}}
+      </details>
+      {{- end}}
+      {{- end}}
+
+      {{- with $list := .Data.Commits}}
+      <table>
+        <caption>{{len $list}} commits total</caption>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Commit</th>
+            <th>Subject</th>
+            <th>Author</th>
+          </tr>
+        </thead>
+        <tbody>
+        {{- range $list}}
+          <tr>
+            <td>
+              <time datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "01/02/06 15:04"}}</time>
+            </td>
+            <td><code>{{.Abbr}}</code></td>
+            <td><a href="/commit/{{.Hash}}/">{{.Subject}}</a></td>
+            <td><a href="mailto:{{.Author.Email}}">{{.Author.Name}}</a></td>
+          </tr>
+        {{- end}}
+        </tbody>
+      </table>
+      {{- end}}
+
+      {{- with .Data.Commit}}
+      <h2>Branch: <a href="/branch/{{.Branch}}/">{{.Branch}}</a></h2>
+      <dl>
+        <dt>Author</dt>
+        <dd>{{.Author.Name}} <{{.Author.Email}}></dd>
+        <dt>Date</dt>
+        <dd>{{.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
+        <dt>Commit</dt>
+        <dd>{{.Hash}}</dd>
+        {{- range .Parents }}
+        <dt>Parent</dt>
+        <dd>
+          <a href="/commit/{{.}}">{{.}}</a>
+          (<a href="/commit/{{$.Data.Commit.Hash}}/diff-to-{{.}}.html">diff to parent</a>)
+        </dd>
+        {{- end }}
+        {{- with .Body }}
+        <dt>Log message</dt>
+        <dd><pre>{{.}}</pre></dd>
+        {{- end }}
+        <dt>Diff stat</dt>
+        {{- range .History }}
+        <dd><pre>{{.}}</pre></dd>
+        {{- end }}
+        <dt>Files</dt>
+        {{- range .Tree}}
+        <dd>
+          <a href="/commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
+          (<a href="/object/{{slice .Hash 0 2}}/{{.Hash}}" download="{{.Path}}">raw</a>)
+        </dd>
+        {{- end}}
+      </dl>
+      {{- end}}
+
+      {{- with .Data.Diff}}
+      {{- with .Commit}}
+      <h2>Branch: <a href="/branch/{{.Branch}}/">{{.Branch}}</a></h2>
+      <h3>Commit: <a href="/commit/{{.Hash}}/">{{.Hash}}</a></h3>
+      <dl>
+        <dt>Author</dt>
+        <dd>{{.Author.Name}} <{{.Author.Email}}></dd>
+        <dt>Date</dt>
+        <dd>{{.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
+        <dt>Parent</dt>
+        <dd>
+          <a href="/commit/{{$.Data.Diff.Parent}}">{{$.Data.Diff.Parent}}</a>
+        </dd>
+      </dl>
+      {{- end }}
+      <pre>{{.Body}}</pre>
+      {{- end }}
+
+      {{- with .Data.Object}}
+      <table>
+      <tr>
+        <td>
+          <pre>
+          {{- $l := (printf "%d" (len .Lines)) -}}
+          {{- range .Lines -}}
+            <a href="#L{{.}}" id="L{{.}}">{{printf "%*d" (len $l) .}}</a><br>
+          {{- end -}}
+          </pre>
+        </td>
+        <td><pre>{{.Body}}</pre></td>
+      </tr>
+      <table>
+      {{- end }}
+      <hr>
+    </main>
+    <footer>
+      <p>Made with <a href="https://github.com/thewhodidthis/gtx">gtx</a> &rsaquo;</p>
+    </footer>
+  </body>
+</html>
