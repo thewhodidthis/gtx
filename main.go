@@ -21,29 +21,23 @@ import (
 	"time"
 )
 
-// For separating out commit line items.
+// SEP is a UUID v4 used to separate out commit line items.
 const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
 
-//go:embed branch.html.tmpl
-var bTmpl string
+//go:embed page.html.tmpl
+var tpl string
 
-//go:embed home.html.tmpl
-var rTmpl string
-
-//go:embed commit.html.tmpl
-var cTmpl string
-
-//go:embed diff.html.tmpl
-var dTmpl string
-
-//go:embed object.html.tmpl
-var oTmpl string
-
-type repository struct {
+type project struct {
 	base     string
 	Branches []branch
 	Name     string
-	temp     string
+	repo     string
+}
+
+type page struct {
+	Breadcrumbs []string
+	Data        map[string]interface{}
+	Title       string
 }
 
 type branch struct {
@@ -110,9 +104,10 @@ type options struct {
 	Branches manyflag `json:"branches"`
 	config   string
 	Force    bool   `json:"force"`
-	Project  string `json:"project"`
+	Name     string `json:"name"`
 	Quiet    bool   `json:"quiet"`
-	Repo     string `json:"repo"`
+	Source   string `json:"source"`
+	Template string `json:"template"`
 	URL      string `json:"url"`
 }
 
@@ -149,16 +144,28 @@ func main() {
 		config: ".jimmy.json",
 	}
 
-	flag.StringVar(&opt.Project, "p", "Jimbo", "Project title")
-	flag.StringVar(&opt.Repo, "r", "", "Target repo")
+	// NOTE: Flags need match each option key's first letter.
+	flag.StringVar(&opt.Name, "n", "Jimbo", "Project title")
+	flag.StringVar(&opt.Source, "s", "", "Source repository")
 	flag.Var(&opt.Branches, "b", "Target branches")
-	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Repo public URL")
+	flag.StringVar(&opt.Template, "t", "", "Page template")
+	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Source URL")
 	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
 	flag.BoolVar(&opt.Force, "f", false, "Force rebuild")
 	flag.Parse()
 
 	if opt.Quiet {
 		log.SetOutput(io.Discard)
+	}
+
+	if opt.Template != "" {
+		bs, err := os.ReadFile(opt.Template)
+
+		if err != nil {
+			log.Printf("unable to read template: %v", err)
+		} else {
+			tpl = string(bs)
+		}
 	}
 
 	cwd, err := os.Getwd()
@@ -168,11 +175,11 @@ func main() {
 	}
 
 	// Defaults to the current working directory if no argument present.
-	outpath := flag.Arg(0)
+	dir := flag.Arg(0)
 
-	// Make sure `outpath` is an absolute path.
-	if ok := filepath.IsAbs(outpath); !ok {
-		outpath = filepath.Join(cwd, outpath)
+	// Make sure `dir` is an absolute path.
+	if ok := filepath.IsAbs(dir); !ok {
+		dir = filepath.Join(cwd, dir)
 	}
 
 	// Create a separate options instance for reading config file values into.
@@ -182,14 +189,14 @@ func main() {
 	store.Branches = append(store.Branches, opt.Branches...)
 
 	// Attempt to read saved settings.
-	bs, err := os.ReadFile(filepath.Join(outpath, opt.config))
+	cnf, err := os.ReadFile(filepath.Join(dir, opt.config))
 
 	if err != nil {
 		log.Printf("unable to read config file: %v", err)
 	}
 
 	// If a config file exists and an option has not been set, override default to match.
-	if err := json.Unmarshal(bs, &store); err != nil {
+	if err := json.Unmarshal(cnf, &store); err != nil {
 		log.Printf("unable to parse config file: %v", err)
 	}
 
@@ -200,6 +207,8 @@ func main() {
 	flag.Visit(func(f *flag.Flag) {
 		flagset[f.Name] = true
 	})
+
+	log.Print(flagset)
 
 	ref := reflect.ValueOf(store)
 	tab := tabwriter.NewWriter(log.Writer(), 0, 0, 0, '.', 0)
@@ -228,27 +237,27 @@ func main() {
 	tab.Flush()
 
 	// The repo flag is required at this point.
-	if ok := filepath.IsAbs(opt.Repo); ok {
+	if ok := filepath.IsAbs(opt.Source); ok {
 		// Option considered repo-like if it contains a hidden `.git` dir.
-		if _, err := os.Stat(filepath.Join(opt.Repo, ".git")); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(opt.Source, ".git")); os.IsNotExist(err) {
 			flag.Usage()
 			os.Exit(1)
 		}
 	} else {
 		// Allow for URL-looking non-local repos.
-		if _, err := url.ParseRequestURI(opt.Repo); err != nil {
+		if _, err := url.ParseRequestURI(opt.Source); err != nil {
 			flag.Usage()
 			os.Exit(1)
 		}
 	}
 
-	// Make sure `outpath` exists.
-	if err := os.MkdirAll(outpath, 0750); err != nil {
+	// Make sure `dir` exists.
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		log.Fatalf("unable to create output directory: %v", err)
 	}
 
 	// Save current settings for future use.
-	if err := opt.save(outpath); err != nil {
+	if err := opt.save(dir); err != nil {
 		log.Fatalf("unable to save options: %v", err)
 	}
 
@@ -258,31 +267,31 @@ func main() {
 		log.Fatalf("unable to locate user cache folder: %s", err)
 	}
 
-	p, err := os.MkdirTemp(ucd, "gtx-*")
+	tmp, err := os.MkdirTemp(ucd, "gtx-*")
 
 	if err != nil {
 		log.Fatalf("unable to locate temporary host dir: %s", err)
 	}
 
-	log.Printf("user cache set: %s", p)
+	log.Printf("user cache set: %s", tmp)
 
-	repo := &repository{
-		base: outpath,
-		Name: opt.Project,
-		temp: p,
+	prj := &project{
+		base: dir,
+		Name: opt.Name,
+		repo: tmp,
 	}
 
 	// Create base directories.
-	if err := repo.init(opt.Force); err != nil {
+	if err := prj.init(opt.Force); err != nil {
 		log.Fatalf("unable to initialize output directory: %v", err)
 	}
 
 	// Clone target repo.
-	if err := repo.save(opt.Repo); err != nil {
+	if err := prj.save(opt.Source); err != nil {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	branches, err := repo.branchfilter(opt.Branches)
+	branches, err := prj.branchfilter(opt.Branches)
 
 	if err != nil {
 		log.Fatalf("unable to filter branches: %v", err)
@@ -296,7 +305,7 @@ func main() {
 		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
 
 		cmd := exec.Command("git", "fetch", "--force", "origin", ref)
-		cmd.Dir = repo.temp
+		cmd.Dir = prj.repo
 
 		if _, err := cmd.Output(); err != nil {
 			log.Printf("unable to fetch branch: %v", err)
@@ -310,7 +319,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 
-			dst := filepath.Join(outpath, "branch", b.Name, "index.html")
+			dst := filepath.Join(prj.base, "branch", b.Name, "index.html")
 
 			if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 				if err != nil {
@@ -331,9 +340,16 @@ func main() {
 				return
 			}
 
-			t := template.Must(template.New("branch").Parse(bTmpl))
+			t := template.Must(template.New("branch").Parse(tpl))
+			p := page{
+				Data: map[string]interface{}{
+					"Commits": b.Commits,
+					"Project": prj.Name,
+				},
+				Title: strings.Join([]string{prj.Name, b.Name}, ": "),
+			}
 
-			if err := t.Execute(f, b); err != nil {
+			if err := t.Execute(f, p); err != nil {
 				log.Printf("unable to apply template: %v", err)
 
 				return
@@ -345,7 +361,7 @@ func main() {
 		for i, c := range b.Commits {
 			log.Printf("processing commit: %s: %d/%d", c.Abbr, i+1, len(b.Commits))
 
-			base := filepath.Join(outpath, "commit", c.Hash)
+			base := filepath.Join(prj.base, "commit", c.Hash)
 
 			if err := os.MkdirAll(base, 0750); err != nil {
 				if err != nil {
@@ -355,13 +371,25 @@ func main() {
 				continue
 			}
 
-			for _, parent := range c.Parents {
+			for _, psh := range c.Parents {
 				wg.Add(1)
 
 				go func() {
 					defer wg.Done()
 
-					dst := filepath.Join(base, fmt.Sprintf("diff-to-%s.html", parent))
+					// NOTE: Use <em>, <ins>, and <del> instead of blue, green, red <font> elements
+					cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", psh, c.Hash))
+					cmd.Dir = prj.repo
+
+					out, err := cmd.Output()
+
+					if err != nil {
+						log.Printf("unable to diff against parent: %v", err)
+
+						return
+					}
+
+					dst := filepath.Join(base, fmt.Sprintf("diff-to-%s.html", psh))
 					f, err := os.Create(dst)
 
 					defer f.Close()
@@ -372,33 +400,24 @@ func main() {
 						return
 					}
 
-					t := template.Must(template.New("diff").Parse(dTmpl))
-
-					// NOTE: Use <em>, <ins>, and <del> instead of blue, green, red <font> elements
-					cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", parent, c.Hash))
-					cmd.Dir = repo.temp
-
-					out, err := cmd.Output()
-
-					if err != nil {
-						log.Printf("unable to diff against parent: %v", err)
-
-						return
+					t := template.Must(template.New("diff").Parse(tpl))
+					p := page{
+						Data: map[string]interface{}{
+							"Diff": struct {
+								Body   string
+								Commit commit
+								Parent string
+							}{
+								Body:   fmt.Sprintf("%s", out),
+								Commit: c,
+								Parent: psh,
+							},
+							"Project": prj.Name,
+						},
+						Title: strings.Join([]string{prj.Name, b.Name, c.Abbr}, ": "),
 					}
 
-					body := fmt.Sprintf("%s", out)
-					data := struct {
-						Body   string
-						Commit commit
-						// TODO: Make this a hash type?
-						Parent string
-					}{
-						Body:   body,
-						Commit: c,
-						Parent: parent,
-					}
-
-					if err := t.Execute(f, data); err != nil {
+					if err := t.Execute(f, p); err != nil {
 						log.Printf("unable to apply template: %v", err)
 
 						return
@@ -406,8 +425,8 @@ func main() {
 				}()
 			}
 
-			for _, object := range c.Tree {
-				dst := filepath.Join(outpath, "object", object.Hash[0:2], object.Hash)
+			for _, obj := range c.Tree {
+				dst := filepath.Join(prj.base, "object", obj.Hash[0:2], obj.Hash)
 
 				if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 					if err != nil {
@@ -417,13 +436,9 @@ func main() {
 					continue
 				}
 
-				wg.Add(1)
-
-				go func(name string) {
-					defer wg.Done()
-
-					cmd := exec.Command("git", "show", "--no-notes", object.Hash)
-					cmd.Dir = repo.temp
+				func(name string) {
+					cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
+					cmd.Dir = prj.repo
 
 					out, err := cmd.Output()
 
@@ -443,28 +458,38 @@ func main() {
 						return
 					}
 
-					body := fmt.Sprintf("%s", out)
-					data := struct {
-						Body    string
-						Hash    string
-						Project string
-					}{
-						Body:    body,
-						Hash:    object.Hash,
-						Project: opt.Project,
+					var lines = make([]int, bytes.Count(out, []byte("\n")))
+
+					for i := range lines {
+						lines[i] = i + 1
 					}
 
-					t := template.Must(template.New("object").Parse(oTmpl))
+					t := template.Must(template.New("object").Parse(tpl))
+					p := page{
+						Data: map[string]interface{}{
+							"Object": struct {
+								Body  string
+								Hash  string
+								Lines []int
+							}{
+								Body:  fmt.Sprintf("%s", out),
+								Hash:  obj.Hash,
+								Lines: lines,
+							},
+							"Project": prj.Name,
+						},
+						Title: strings.Join([]string{prj.Name, b.Name, c.Abbr, obj.Path}, ": "),
+					}
 
-					if err := t.Execute(f, data); err != nil {
+					if err := t.Execute(f, p); err != nil {
 						log.Printf("unable to apply template: %v", err)
 
 						return
 					}
 
-					link := filepath.Join(base, fmt.Sprintf("%s.html", object.Path))
+					lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
 
-					if err := os.MkdirAll(filepath.Dir(link), 0750); err != nil {
+					if err := os.MkdirAll(filepath.Dir(lnk), 0750); err != nil {
 						if err != nil {
 							log.Printf("unable to create hard link path: %v", err)
 						}
@@ -472,7 +497,7 @@ func main() {
 						return
 					}
 
-					if err := os.Link(name, link); err != nil {
+					if err := os.Link(name, lnk); err != nil {
 						if os.IsExist(err) {
 							return
 						}
@@ -482,8 +507,8 @@ func main() {
 				}(fmt.Sprintf("%s.html", dst))
 
 				func(name string) {
-					cmd := exec.Command("git", "cat-file", "blob", object.Hash)
-					cmd.Dir = repo.temp
+					cmd := exec.Command("git", "cat-file", "blob", obj.Hash)
+					cmd.Dir = prj.repo
 
 					out, err := cmd.Output()
 
@@ -527,9 +552,16 @@ func main() {
 					return
 				}
 
-				t := template.Must(template.New("commit").Parse(cTmpl))
+				t := template.Must(template.New("commit").Parse(tpl))
+				p := page{
+					Data: map[string]interface{}{
+						"Commit":  c,
+						"Project": prj.Name,
+					},
+					Title: strings.Join([]string{prj.Name, b.Name, c.Abbr}, ": "),
+				}
 
-				if err := t.Execute(f, c); err != nil {
+				if err := t.Execute(f, p); err != nil {
 					log.Printf("unable to apply template: %v", err)
 
 					return
@@ -544,7 +576,7 @@ func main() {
 		defer wg.Done()
 
 		// This is the main index or project home.
-		f, err := os.Create(filepath.Join(outpath, "index.html"))
+		f, err := os.Create(filepath.Join(prj.base, "index.html"))
 
 		defer f.Close()
 
@@ -552,18 +584,17 @@ func main() {
 			log.Fatalf("unable to create home page: %v", err)
 		}
 
-		t := template.Must(template.New("home").Parse(rTmpl))
-		data := struct {
-			Branches []branch
-			Link     string
-			Project  string
-		}{
-			Branches: branches,
-			Link:     opt.URL,
-			Project:  opt.Project,
+		t := template.Must(template.New("home").Parse(tpl))
+		p := page{
+			Data: map[string]interface{}{
+				"Branches": branches,
+				"Link":     opt.URL,
+				"Project":  prj.Name,
+			},
+			Title: prj.Name,
 		}
 
-		if err := t.Execute(f, data); err != nil {
+		if err := t.Execute(f, p); err != nil {
 			log.Fatalf("unable to apply template: %v", err)
 		}
 	}()
@@ -572,11 +603,11 @@ func main() {
 }
 
 // Creates base directories for holding objects, branches, and commits.
-func (r *repository) init(f bool) error {
+func (prj *project) init(f bool) error {
 	dirs := []string{"branch", "commit", "object"}
 
 	for _, dir := range dirs {
-		d := filepath.Join(r.base, dir)
+		d := filepath.Join(prj.base, dir)
 
 		// Clear existing dirs when -f true.
 		if f && dir != "branch" {
@@ -594,18 +625,18 @@ func (r *repository) init(f bool) error {
 }
 
 // Saves a local clone of `target` repo.
-func (r *repository) save(target string) error {
-	if _, err := os.Stat(r.temp); err != nil {
+func (prj *project) save(target string) error {
+	if _, err := os.Stat(prj.repo); err != nil {
 		return err
 	}
 
-	return exec.Command("git", "clone", target, r.temp).Run()
+	return exec.Command("git", "clone", target, prj.repo).Run()
 }
 
 // Goes through list of branches and returns those that match whitelist.
-func (r *repository) branchfilter(whitelist manyflag) ([]branch, error) {
+func (prj *project) branchfilter(whitelist manyflag) ([]branch, error) {
 	cmd := exec.Command("git", "branch", "-a")
-	cmd.Dir = r.temp
+	cmd.Dir = prj.repo
 
 	out, err := cmd.Output()
 
@@ -640,25 +671,25 @@ func (r *repository) branchfilter(whitelist manyflag) ([]branch, error) {
 
 	for k, v := range m {
 		if v {
-			commits, err := r.commitparser(k)
+			commits, err := prj.commitparser(k)
 
 			if err != nil {
 				continue
 			}
 
-			results = append(results, branch{commits, k, r.Name})
+			results = append(results, branch{commits, k, prj.Name})
 		}
 	}
 
 	return results, nil
 }
 
-func (r *repository) commitparser(b string) ([]commit, error) {
+func (prj *project) commitparser(b string) ([]commit, error) {
 	fst := strings.Join([]string{"%H", "%P", "%s", "%aN", "%aE", "%aD", "%h"}, SEP)
 	ref := fmt.Sprintf("origin/%s", b)
 
 	cmd := exec.Command("git", "log", "--graph", fmt.Sprintf("--format=%s", fst), ref)
-	cmd.Dir = r.temp
+	cmd.Dir = prj.repo
 
 	out, err := cmd.Output()
 
@@ -684,7 +715,7 @@ func (r *repository) commitparser(b string) ([]commit, error) {
 			continue
 		}
 
-		body, err := r.bodyparser(h)
+		body, err := prj.bodyparser(h)
 
 		if err != nil {
 			log.Printf("unable to parse commit body: %s", err)
@@ -692,7 +723,7 @@ func (r *repository) commitparser(b string) ([]commit, error) {
 			continue
 		}
 
-		tree, err := r.treeparser(h)
+		tree, err := prj.treeparser(h)
 
 		if err != nil {
 			log.Printf("unable to parse commit tree: %s", err)
@@ -708,7 +739,7 @@ func (r *repository) commitparser(b string) ([]commit, error) {
 		}
 
 		for _, p := range parents {
-			diffstat, err := r.diffparser(h, p)
+			diffstat, err := prj.diffparser(h, p)
 
 			if err != nil {
 				log.Printf("unable to diff stat against parent: %s", err)
@@ -730,7 +761,7 @@ func (r *repository) commitparser(b string) ([]commit, error) {
 			Tree:    tree,
 			Graph:   g,
 			Parents: parents,
-			Project: r.Name,
+			Project: prj.Name,
 			Subject: data[2],
 		}
 
@@ -744,10 +775,10 @@ func (r *repository) commitparser(b string) ([]commit, error) {
 	return results, nil
 }
 
-func (r *repository) treeparser(h string) ([]object, error) {
+func (prj *project) treeparser(h string) ([]object, error) {
 	// git ls-tree --format='%(objectname) %(path)' <tree-ish>
 	cmd := exec.Command("git", "ls-tree", "-r", "--format=%(objectname) %(path)", h)
-	cmd.Dir = r.temp
+	cmd.Dir = prj.repo
 
 	out, err := cmd.Output()
 
@@ -770,10 +801,10 @@ func (r *repository) treeparser(h string) ([]object, error) {
 	return results, nil
 }
 
-func (r *repository) diffparser(h, p string) (string, error) {
+func (prj *project) diffparser(h, p string) (string, error) {
 	// histo, file, changes, sum
 	cmd := exec.Command("git", "diff", "--stat", fmt.Sprintf("%s..%s", p, h))
-	cmd.Dir = r.temp
+	cmd.Dir = prj.repo
 
 	out, err := cmd.Output()
 
@@ -797,10 +828,10 @@ func (r *repository) diffparser(h, p string) (string, error) {
 	return strings.Join(results, "\n"), nil
 }
 
-func (r *repository) bodyparser(h string) (string, error) {
+func (prj *project) bodyparser(h string) (string, error) {
 	// Because the commit message body is multiline and is tripping the scanner.
 	cmd := exec.Command("git", "show", "--no-patch", "--format=%B", h)
-	cmd.Dir = r.temp
+	cmd.Dir = prj.repo
 
 	out, err := cmd.Output()
 
