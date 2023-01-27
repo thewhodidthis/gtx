@@ -15,17 +15,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"text/tabwriter"
 	"time"
 )
 
-// SEP is a UUID v4 used to separate out commit line items.
+// SEP is a browser generated UUID v4 used to separate out commit line items.
 const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
 
 //go:embed page.html.tmpl
 var tpl string
+
+// Match diff body keywords.
+var xline = regexp.MustCompile(`^(deleted|index|new|rename|similarity)`)
+
+// Match diff body @@ del, ins line numbers.
+var aline = regexp.MustCompile(`\-(.*?),`)
+var bline = regexp.MustCompile(`\+(.*?),`)
+
+// Helps target file specific diff blocks.
+var diffanchor = regexp.MustCompile(`b\/(.*?)$`)
 
 type project struct {
 	base     string
@@ -34,10 +45,13 @@ type project struct {
 	repo     string
 }
 
+// Data is the generic content map passed on to the page template.
+type Data map[string]interface{}
 type page struct {
 	Breadcrumbs []string
-	Data        map[string]interface{}
-	Title       string
+	Data
+	Stylesheet string
+	Title      string
 }
 
 type branch struct {
@@ -48,6 +62,18 @@ type branch struct {
 
 func (b branch) String() string {
 	return b.Name
+}
+
+type diff struct {
+	Body   string
+	Commit commit
+	Parent string
+}
+
+type overview struct {
+	Body   string
+	Hash   string
+	Parent string
 }
 
 type hash struct {
@@ -68,7 +94,7 @@ type commit struct {
 	Branch  string
 	Body    string
 	Abbr    string
-	History []string
+	History []overview
 	Parents []string
 	Graph   string
 	Hash    string
@@ -208,8 +234,6 @@ func main() {
 		flagset[f.Name] = true
 	})
 
-	log.Print(flagset)
-
 	ref := reflect.ValueOf(store)
 	tab := tabwriter.NewWriter(log.Writer(), 0, 0, 0, '.', 0)
 
@@ -275,29 +299,33 @@ func main() {
 
 	log.Printf("user cache set: %s", tmp)
 
-	prj := &project{
+	pro := &project{
 		base: dir,
 		Name: opt.Name,
 		repo: tmp,
 	}
 
 	// Create base directories.
-	if err := prj.init(opt.Force); err != nil {
+	if err := pro.init(opt.Force); err != nil {
 		log.Fatalf("unable to initialize output directory: %v", err)
 	}
 
 	// Clone target repo.
-	if err := prj.save(opt.Source); err != nil {
+	if err := pro.save(opt.Source); err != nil {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	branches, err := prj.branchfilter(opt.Branches)
+	branches, err := pro.branchfilter(opt.Branches)
 
 	if err != nil {
 		log.Fatalf("unable to filter branches: %v", err)
 	}
 
 	var wg sync.WaitGroup
+	t := template.Must(template.New("page").Funcs(template.FuncMap{
+		"diffstatbodyparser": diffstatbodyparser,
+		"diffbodyparser":     diffbodyparser,
+	}).Parse(tpl))
 
 	// Update each branch.
 	for _, b := range branches {
@@ -305,21 +333,25 @@ func main() {
 		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
 
 		cmd := exec.Command("git", "fetch", "--force", "origin", ref)
-		cmd.Dir = prj.repo
+		cmd.Dir = pro.repo
+
+		log.Printf("updating branch: %s", b)
 
 		if _, err := cmd.Output(); err != nil {
 			log.Printf("unable to fetch branch: %v", err)
 
 			continue
 		}
+	}
 
+	for _, b := range branches {
 		log.Printf("processing branch: %s", b)
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
 
-			dst := filepath.Join(prj.base, "branch", b.Name, "index.html")
+			dst := filepath.Join(pro.base, "branch", b.Name, "index.html")
 
 			if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 				if err != nil {
@@ -340,13 +372,12 @@ func main() {
 				return
 			}
 
-			t := template.Must(template.New("branch").Parse(tpl))
 			p := page{
-				Data: map[string]interface{}{
+				Data: Data{
 					"Commits": b.Commits,
-					"Project": prj.Name,
+					"Project": pro.Name,
 				},
-				Title: strings.Join([]string{prj.Name, b.Name}, ": "),
+				Title: strings.Join([]string{pro.Name, b.Name}, ": "),
 			}
 
 			if err := t.Execute(f, p); err != nil {
@@ -355,13 +386,11 @@ func main() {
 				return
 			}
 		}()
-	}
 
-	for _, b := range branches {
 		for i, c := range b.Commits {
 			log.Printf("processing commit: %s: %d/%d", c.Abbr, i+1, len(b.Commits))
 
-			base := filepath.Join(prj.base, "commit", c.Hash)
+			base := filepath.Join(pro.base, "commit", c.Hash)
 
 			if err := os.MkdirAll(base, 0750); err != nil {
 				if err != nil {
@@ -371,15 +400,14 @@ func main() {
 				continue
 			}
 
-			for _, psh := range c.Parents {
+			for _, par := range c.Parents {
 				wg.Add(1)
 
 				go func() {
 					defer wg.Done()
 
-					// NOTE: Use <em>, <ins>, and <del> instead of blue, green, red <font> elements
-					cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", psh, c.Hash))
-					cmd.Dir = prj.repo
+					cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", par, c.Hash))
+					cmd.Dir = pro.repo
 
 					out, err := cmd.Output()
 
@@ -389,32 +417,27 @@ func main() {
 						return
 					}
 
-					dst := filepath.Join(base, fmt.Sprintf("diff-to-%s.html", psh))
+					dst := filepath.Join(base, fmt.Sprintf("diff-%s.html", par))
 					f, err := os.Create(dst)
 
 					defer f.Close()
 
 					if err != nil {
-						log.Printf("unable to create commit diff to parent page: %v", err)
+						log.Printf("unable to create commit diff to parent: %v", err)
 
 						return
 					}
 
-					t := template.Must(template.New("diff").Parse(tpl))
 					p := page{
-						Data: map[string]interface{}{
-							"Diff": struct {
-								Body   string
-								Commit commit
-								Parent string
-							}{
+						Data: Data{
+							"Diff": diff{
 								Body:   fmt.Sprintf("%s", out),
 								Commit: c,
-								Parent: psh,
+								Parent: par,
 							},
-							"Project": prj.Name,
+							"Project": pro.Name,
 						},
-						Title: strings.Join([]string{prj.Name, b.Name, c.Abbr}, ": "),
+						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
 					}
 
 					if err := t.Execute(f, p); err != nil {
@@ -426,7 +449,7 @@ func main() {
 			}
 
 			for _, obj := range c.Tree {
-				dst := filepath.Join(prj.base, "object", obj.Hash[0:2], obj.Hash)
+				dst := filepath.Join(pro.base, "object", obj.Hash[0:2], obj.Hash)
 
 				if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 					if err != nil {
@@ -438,7 +461,7 @@ func main() {
 
 				func(name string) {
 					cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
-					cmd.Dir = prj.repo
+					cmd.Dir = pro.repo
 
 					out, err := cmd.Output()
 
@@ -464,9 +487,8 @@ func main() {
 						lines[i] = i + 1
 					}
 
-					t := template.Must(template.New("object").Parse(tpl))
 					p := page{
-						Data: map[string]interface{}{
+						Data: Data{
 							"Object": struct {
 								Body  string
 								Hash  string
@@ -476,9 +498,9 @@ func main() {
 								Hash:  obj.Hash,
 								Lines: lines,
 							},
-							"Project": prj.Name,
+							"Project": pro.Name,
 						},
-						Title: strings.Join([]string{prj.Name, b.Name, c.Abbr, obj.Path}, ": "),
+						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr, obj.Path}, ": "),
 					}
 
 					if err := t.Execute(f, p); err != nil {
@@ -508,7 +530,7 @@ func main() {
 
 				func(name string) {
 					cmd := exec.Command("git", "cat-file", "blob", obj.Hash)
-					cmd.Dir = prj.repo
+					cmd.Dir = pro.repo
 
 					out, err := cmd.Output()
 
@@ -536,11 +558,7 @@ func main() {
 				}(dst)
 			}
 
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			func() {
 				dst := filepath.Join(base, "index.html")
 				f, err := os.Create(dst)
 
@@ -552,13 +570,12 @@ func main() {
 					return
 				}
 
-				t := template.Must(template.New("commit").Parse(tpl))
 				p := page{
-					Data: map[string]interface{}{
+					Data: Data{
 						"Commit":  c,
-						"Project": prj.Name,
+						"Project": pro.Name,
 					},
-					Title: strings.Join([]string{prj.Name, b.Name, c.Abbr}, ": "),
+					Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
 				}
 
 				if err := t.Execute(f, p); err != nil {
@@ -576,7 +593,7 @@ func main() {
 		defer wg.Done()
 
 		// This is the main index or project home.
-		f, err := os.Create(filepath.Join(prj.base, "index.html"))
+		f, err := os.Create(filepath.Join(pro.base, "index.html"))
 
 		defer f.Close()
 
@@ -584,14 +601,13 @@ func main() {
 			log.Fatalf("unable to create home page: %v", err)
 		}
 
-		t := template.Must(template.New("home").Parse(tpl))
 		p := page{
-			Data: map[string]interface{}{
+			Data: Data{
 				"Branches": branches,
 				"Link":     opt.URL,
-				"Project":  prj.Name,
+				"Project":  pro.Name,
 			},
-			Title: prj.Name,
+			Title: pro.Name,
 		}
 
 		if err := t.Execute(f, p); err != nil {
@@ -603,11 +619,11 @@ func main() {
 }
 
 // Creates base directories for holding objects, branches, and commits.
-func (prj *project) init(f bool) error {
+func (pro *project) init(f bool) error {
 	dirs := []string{"branch", "commit", "object"}
 
 	for _, dir := range dirs {
-		d := filepath.Join(prj.base, dir)
+		d := filepath.Join(pro.base, dir)
 
 		// Clear existing dirs when -f true.
 		if f && dir != "branch" {
@@ -625,18 +641,18 @@ func (prj *project) init(f bool) error {
 }
 
 // Saves a local clone of `target` repo.
-func (prj *project) save(target string) error {
-	if _, err := os.Stat(prj.repo); err != nil {
+func (pro *project) save(target string) error {
+	if _, err := os.Stat(pro.repo); err != nil {
 		return err
 	}
 
-	return exec.Command("git", "clone", target, prj.repo).Run()
+	return exec.Command("git", "clone", target, pro.repo).Run()
 }
 
 // Goes through list of branches and returns those that match whitelist.
-func (prj *project) branchfilter(whitelist manyflag) ([]branch, error) {
+func (pro *project) branchfilter(whitelist manyflag) ([]branch, error) {
 	cmd := exec.Command("git", "branch", "-a")
-	cmd.Dir = prj.repo
+	cmd.Dir = pro.repo
 
 	out, err := cmd.Output()
 
@@ -644,15 +660,16 @@ func (prj *project) branchfilter(whitelist manyflag) ([]branch, error) {
 		return nil, err
 	}
 
+	var b = make(map[string]branch)
 	var m = make(map[string]bool)
 
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 
 	for scanner.Scan() {
-		t := strings.TrimSpace(scanner.Text())
+		t := strings.TrimSpace(strings.TrimPrefix(scanner.Text(), "*"))
 		_, f := filepath.Split(t)
 
-		m[f] = !strings.Contains(f, "HEAD")
+		m[f] = true
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -664,32 +681,42 @@ func (prj *project) branchfilter(whitelist manyflag) ([]branch, error) {
 		for k := range m {
 			m[k] = contains(whitelist, k)
 		}
+	} else {
+		// In git given order at this point.
+		for k := range m {
+			whitelist = append(whitelist, k)
+		}
 	}
-
-	// Fill in resulting slice with desired branches.
-	var results []branch
 
 	for k, v := range m {
 		if v {
-			commits, err := prj.commitparser(k)
+			// TODO: Try a goroutine?
+			commits, err := pro.commitparser(k)
 
 			if err != nil {
 				continue
 			}
 
-			results = append(results, branch{commits, k, prj.Name})
+			b[k] = branch{commits, k, pro.Name}
 		}
+	}
+
+	// Fill in resulting slice with desired branches in order.
+	var results []branch
+
+	for _, v := range whitelist {
+		results = append(results, b[v])
 	}
 
 	return results, nil
 }
 
-func (prj *project) commitparser(b string) ([]commit, error) {
+func (pro *project) commitparser(b string) ([]commit, error) {
 	fst := strings.Join([]string{"%H", "%P", "%s", "%aN", "%aE", "%aD", "%h"}, SEP)
 	ref := fmt.Sprintf("origin/%s", b)
 
 	cmd := exec.Command("git", "log", "--graph", fmt.Sprintf("--format=%s", fst), ref)
-	cmd.Dir = prj.repo
+	cmd.Dir = pro.repo
 
 	out, err := cmd.Output()
 
@@ -715,7 +742,7 @@ func (prj *project) commitparser(b string) ([]commit, error) {
 			continue
 		}
 
-		body, err := prj.bodyparser(h)
+		body, err := pro.bodyparser(h)
 
 		if err != nil {
 			log.Printf("unable to parse commit body: %s", err)
@@ -723,7 +750,7 @@ func (prj *project) commitparser(b string) ([]commit, error) {
 			continue
 		}
 
-		tree, err := prj.treeparser(h)
+		tree, err := pro.treeparser(h)
 
 		if err != nil {
 			log.Printf("unable to parse commit tree: %s", err)
@@ -731,7 +758,7 @@ func (prj *project) commitparser(b string) ([]commit, error) {
 			continue
 		}
 
-		var history []string
+		var history []overview
 		var parents []string
 
 		if data[1] != "" {
@@ -739,7 +766,7 @@ func (prj *project) commitparser(b string) ([]commit, error) {
 		}
 
 		for _, p := range parents {
-			diffstat, err := prj.diffparser(h, p)
+			diffstat, err := pro.diffstatparser(h, p)
 
 			if err != nil {
 				log.Printf("unable to diff stat against parent: %s", err)
@@ -747,22 +774,22 @@ func (prj *project) commitparser(b string) ([]commit, error) {
 				continue
 			}
 
-			history = append(history, diffstat)
+			history = append(history, overview{diffstat, h, p})
 		}
 
 		c := commit{
 			Abbr:    data[6],
 			Author:  a,
-			Branch:  b,
 			Body:    body,
+			Branch:  b,
 			Date:    date,
 			Hash:    h,
 			History: history,
-			Tree:    tree,
 			Graph:   g,
 			Parents: parents,
-			Project: prj.Name,
+			Project: pro.Name,
 			Subject: data[2],
+			Tree:    tree,
 		}
 
 		results = append(results, c)
@@ -775,10 +802,10 @@ func (prj *project) commitparser(b string) ([]commit, error) {
 	return results, nil
 }
 
-func (prj *project) treeparser(h string) ([]object, error) {
+func (pro *project) treeparser(h string) ([]object, error) {
 	// git ls-tree --format='%(objectname) %(path)' <tree-ish>
 	cmd := exec.Command("git", "ls-tree", "-r", "--format=%(objectname) %(path)", h)
-	cmd.Dir = prj.repo
+	cmd.Dir = pro.repo
 
 	out, err := cmd.Output()
 
@@ -801,10 +828,9 @@ func (prj *project) treeparser(h string) ([]object, error) {
 	return results, nil
 }
 
-func (prj *project) diffparser(h, p string) (string, error) {
-	// histo, file, changes, sum
+func (pro *project) diffstatparser(h, p string) (string, error) {
 	cmd := exec.Command("git", "diff", "--stat", fmt.Sprintf("%s..%s", p, h))
-	cmd.Dir = prj.repo
+	cmd.Dir = pro.repo
 
 	out, err := cmd.Output()
 
@@ -815,23 +841,17 @@ func (prj *project) diffparser(h, p string) (string, error) {
 	var results []string
 	feed := strings.Split(strings.TrimSuffix(fmt.Sprintf("%s", out), "\n"), "\n")
 
-	for i, line := range feed {
-		if i < len(feed) {
-			// TODO: Parse filenames and stats.
-		} else {
-			// Last line needs no parsing.
-		}
-
+	for _, line := range feed {
 		results = append(results, strings.TrimSpace(line))
 	}
 
 	return strings.Join(results, "\n"), nil
 }
 
-func (prj *project) bodyparser(h string) (string, error) {
+func (pro *project) bodyparser(h string) (string, error) {
 	// Because the commit message body is multiline and is tripping the scanner.
 	cmd := exec.Command("git", "show", "--no-patch", "--format=%B", h)
-	cmd.Dir = prj.repo
+	cmd.Dir = pro.repo
 
 	out, err := cmd.Output()
 
@@ -840,4 +860,73 @@ func (prj *project) bodyparser(h string) (string, error) {
 	}
 
 	return strings.TrimSuffix(fmt.Sprintf("%s", out), "\n"), nil
+}
+
+func diffbodyparser(d diff) template.HTML {
+	var results []string
+	feed := strings.Split(strings.TrimSuffix(template.HTMLEscapeString(d.Body), "\n"), "\n")
+
+	var a, b string
+
+	for _, line := range feed {
+		if strings.HasPrefix(line, "diff") {
+			line = diffanchor.ReplaceAllString(line, `b/<a id="$1">$1</a>`)
+			line = fmt.Sprintf("<strong>%s</strong>", line)
+		}
+
+		line = xline.ReplaceAllString(line, "<em>$1</em>")
+
+		if strings.HasPrefix(line, "@@") {
+			if a != "" && !strings.HasPrefix(a, "---") {
+				repl := fmt.Sprintf(`<a href="/commit/%s/%s.html#L$1">-$1</a>,`, d.Parent, a)
+				line = aline.ReplaceAllString(line, repl)
+			}
+
+			if b != "" && !strings.HasPrefix(b, "+++") {
+				repl := fmt.Sprintf(`<a href="/commit/%s/%s.html#L$1">+$1</a>,`, d.Commit.Hash, b)
+				line = bline.ReplaceAllString(line, repl)
+			}
+		}
+
+		if strings.HasPrefix(line, "---") {
+			a = strings.TrimPrefix(line, "--- a/")
+			line = fmt.Sprintf("<mark>%s</mark>", line)
+		} else if strings.HasPrefix(line, "-") {
+			line = fmt.Sprintf("<del>%s</del>", line)
+		}
+
+		if strings.HasPrefix(line, "+++") {
+			b = strings.TrimPrefix(line, "+++ b/")
+			line = fmt.Sprintf("<mark>%s</mark>", line)
+		} else if strings.HasPrefix(line, "+") {
+			line = fmt.Sprintf("<ins>%s</ins>", line)
+		}
+
+		results = append(results, line)
+	}
+
+	return template.HTML(strings.Join(results, "\n"))
+}
+
+func diffstatbodyparser(o overview) template.HTML {
+	var results []string
+	feed := strings.Split(strings.TrimSuffix(o.Body, "\n"), "\n")
+
+	for i, line := range feed {
+		if i < len(feed)-1 {
+			// Link files to corresponding diff.
+			columns := strings.Split(line, "|")
+			files := strings.Split(columns[0], "=>")
+
+			a := strings.TrimSpace(files[len(files)-1])
+			b := fmt.Sprintf(`<a href="/commit/%s/diff-%s.html#%s">%s</a>`, o.Hash, o.Parent, a, a)
+			l := strings.LastIndex(line, a)
+
+			line = line[:l] + strings.Replace(line[l:], a, b, 1)
+		}
+
+		results = append(results, line)
+	}
+
+	return template.HTML(strings.Join(results, "\n"))
 }
