@@ -3,14 +3,27 @@
   <head>
     <meta charset="utf-8">
     <title>{{.Title}}</title>
+    {{- with .Stylesheet }}
+    <link rel="stylesheet" href="{{.}}">
+    {{- else }}
     <style>
       html {
         font: medium/normal serif;
+      }
+      a:target {
+        outline: 1px dotted;
+      }
+      summary {
+        font-size: large;
+      }
+      figcaption {
+        font-weight: bold;
       }
       caption {
         caption-side: bottom;
       }
     </style>
+    {{- end }}
   </head>
   <body>
     <header>
@@ -30,7 +43,7 @@
       <h2>Branches</h2>
       {{- range $list}}
       <details open>
-        <summary><a href="/branch/{{.Name}}/">{{.Name}}</a></summary>
+        <summary><samp><em><a href="/branch/{{.Name}}/">{{.Name}}</a></em></samp></summary>
         {{- with and (len .Commits) (index .Commits 0) }}
         <dl>
           <dt>Subject</dt>
@@ -66,7 +79,7 @@
             </td>
             <td><code>{{.Abbr}}</code></td>
             <td><a href="/commit/{{.Hash}}/">{{.Subject}}</a></td>
-            <td><a href="mailto:{{.Author.Email}}">{{.Author.Name}}</a></td>
+            <td>{{.Author.Name}}</td>
           </tr>
         {{- end}}
         </tbody>
@@ -81,48 +94,58 @@
         <dt>Date</dt>
         <dd>{{.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
         <dt>Commit</dt>
-        <dd>{{.Hash}}</dd>
+        <dd><a href="/commit/{{.Hash}}/">{{.Hash}}</a></dd>
         {{- range .Parents }}
         <dt>Parent</dt>
         <dd>
           <a href="/commit/{{.}}">{{.}}</a>
-          (<a href="/commit/{{$.Data.Commit.Hash}}/diff-to-{{.}}.html">diff to parent</a>)
+          <a href="/commit/{{$.Data.Commit.Hash}}/diff-{{.}}.html">diff</a>
         </dd>
         {{- end }}
         {{- with .Body }}
         <dt>Log message</dt>
         <dd><pre>{{.}}</pre></dd>
         {{- end }}
-        <dt>Diff stat</dt>
-        {{- range .History }}
-        <dd><pre>{{.}}</pre></dd>
-        {{- end }}
-        <dt>Files</dt>
-        {{- range .Tree}}
-        <dd>
-          <a href="/commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
-          (<a href="/object/{{slice .Hash 0 2}}/{{.Hash}}" download="{{.Path}}">raw</a>)
-        </dd>
-        {{- end}}
       </dl>
+      {{- with $list := .History }}
+      <figure>
+        <figcaption>Overview</figcaption>
+        {{- range $list }}
+        <pre><code>{{diffstatbodyparser .}}</code></pre>
+        {{- end }}
+      </figure>
+      {{- end }}
+      <figure>
+        <figcaption>File tree</figcaption>
+        <ul>
+        {{- range .Tree}}
+        <li>
+          <a href="/commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
+          <a href="/object/{{slice .Hash 0 2}}/{{.Hash}}" download="{{.Path}}">raw</a>
+        </li>
+        {{- end}}
+        </ul>
+      </figure>
       {{- end}}
 
       {{- with .Data.Diff}}
-      {{- with .Commit}}
-      <h2>Branch: <a href="/branch/{{.Branch}}/">{{.Branch}}</a></h2>
-      <h3>Commit: <a href="/commit/{{.Hash}}/">{{.Hash}}</a></h3>
+      <h2>Branch: <a href="/branch/{{.Commit.Branch}}/">{{.Commit.Branch}}</a></h2>
       <dl>
         <dt>Author</dt>
-        <dd>{{.Author.Name}} <{{.Author.Email}}></dd>
+        <dd>{{.Commit.Author.Name}} <{{.Commit.Author.Email}}></dd>
         <dt>Date</dt>
-        <dd>{{.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
+        <dd>{{.Commit.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
+        <dt>Commit</dt>
+        <dd><a href="/commit/{{.Commit.Hash}}/">{{.Commit.Hash}}</a></dd>
         <dt>Parent</dt>
         <dd>
           <a href="/commit/{{$.Data.Diff.Parent}}">{{$.Data.Diff.Parent}}</a>
         </dd>
       </dl>
-      {{- end }}
-      <pre>{{.Body}}</pre>
+      <figure>
+        <figcaption>Changes</figcaption>
+        <pre>{{diffbodyparser .}}</pre>
+      </figure>
       {{- end }}
 
       {{- with .Data.Object}}
@@ -136,10 +159,13 @@
           {{- end -}}
           </pre>
         </td>
-        <td><pre>{{.Body}}</pre></td>
+        <td><pre><code>{{.Body}}</code></pre></td>
       </tr>
       <table>
       {{- end }}
+      <nav>
+        <p>Your are here: {{.Title}}</p>
+      </nav>
       <hr>
     </main>
     <footer>
