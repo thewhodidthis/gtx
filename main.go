@@ -22,11 +22,11 @@ import (
 	"time"
 )
 
-// SEP is a browser generated UUID v4 used to separate out commit line items.
-const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
-
 // EMPTY is git's magic empty tree hash.
 const EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// SEP is a browser generated UUID v4 used to separate out commit line items.
+const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
 
 //go:embed page.html.tmpl
 var tpl string
@@ -55,6 +55,7 @@ type project struct {
 type Data map[string]interface{}
 type page struct {
 	Data
+	Base       string
 	Stylesheet string
 	Title      string
 }
@@ -112,7 +113,6 @@ type commit struct {
 	Abbr    string
 	History []overview
 	Parents []string
-	Graph   string
 	Hash    string
 	Author  author
 	Date    time.Time
@@ -293,7 +293,7 @@ func main() {
 	}
 
 	// Make sure `dir` exists.
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatalf("unable to create output directory: %v", err)
 	}
 
@@ -370,7 +370,7 @@ func main() {
 
 			dst := filepath.Join(pro.base, "branch", b.Name, "index.html")
 
-			if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 				if err != nil {
 					log.Fatalf("unable to create branch directory: %v", err)
 				}
@@ -392,8 +392,10 @@ func main() {
 			p := page{
 				Data: Data{
 					"Commits": b.Commits,
+					"Branch":  b,
 					"Project": pro.Name,
 				},
+				Base:  "../../",
 				Title: strings.Join([]string{pro.Name, b.Name}, ": "),
 			}
 
@@ -409,7 +411,7 @@ func main() {
 
 			base := filepath.Join(pro.base, "commit", c.Hash)
 
-			if err := os.MkdirAll(base, 0750); err != nil {
+			if err := os.MkdirAll(base, 0755); err != nil {
 				if err != nil {
 					log.Printf("unable to create commit directory: %v", err)
 				}
@@ -454,6 +456,7 @@ func main() {
 							},
 							"Project": pro.Name,
 						},
+						Base:  "../../",
 						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
 					}
 
@@ -468,7 +471,7 @@ func main() {
 			for _, obj := range c.Tree {
 				dst := filepath.Join(pro.base, "object", obj.Dir())
 
-				if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+				if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 					if err != nil {
 						log.Printf("unable to create object directory: %v", err)
 					}
@@ -558,6 +561,7 @@ func main() {
 							"Object":  *o,
 							"Project": pro.Name,
 						},
+						Base:  "../../",
 						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr, obj.Path}, ": "),
 					}
 
@@ -569,7 +573,7 @@ func main() {
 
 					lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
 
-					if err := os.MkdirAll(filepath.Dir(lnk), 0750); err != nil {
+					if err := os.MkdirAll(filepath.Dir(lnk), 0755); err != nil {
 						if err != nil {
 							log.Printf("unable to create hard link path: %v", err)
 						}
@@ -604,6 +608,7 @@ func main() {
 						"Commit":  c,
 						"Project": pro.Name,
 					},
+					Base:  "../../",
 					Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
 				}
 
@@ -636,6 +641,7 @@ func main() {
 				"Link":     opt.URL,
 				"Project":  pro.Name,
 			},
+			Base:  "./",
 			Title: pro.Name,
 		}
 
@@ -661,7 +667,7 @@ func (pro *project) init(f bool) error {
 			}
 		}
 
-		if err := os.MkdirAll(d, 0750); err != nil {
+		if err := os.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("unable to create directory: %v", err)
 		}
 	}
@@ -914,12 +920,12 @@ func diffbodyparser(d diff) template.HTML {
 
 		if strings.HasPrefix(line, "@@") {
 			if a != "" && !strings.HasPrefix(a, "---") {
-				repl := fmt.Sprintf(`<a href="/commit/%s/%s.html#L$1">-$1</a>,`, d.Parent, a)
+				repl := fmt.Sprintf(`<a href="commit/%s/%s.html#L$1">-$1</a>,`, d.Parent, a)
 				line = aline.ReplaceAllString(line, repl)
 			}
 
 			if b != "" && !strings.HasPrefix(b, "+++") {
-				repl := fmt.Sprintf(`<a href="/commit/%s/%s.html#L$1">+$1</a>,`, d.Commit.Hash, b)
+				repl := fmt.Sprintf(`<a href="commit/%s/%s.html#L$1">+$1</a>,`, d.Commit.Hash, b)
 				line = bline.ReplaceAllString(line, repl)
 			}
 		}
@@ -955,7 +961,7 @@ func diffstatbodyparser(o overview) template.HTML {
 			files := strings.Split(columns[0], "=>")
 
 			a := strings.TrimSpace(files[len(files)-1])
-			b := fmt.Sprintf(`<a href="/commit/%s/diff-%s.html#%s">%s</a>`, o.Hash, o.Parent, a, a)
+			b := fmt.Sprintf(`<a href="commit/%s/diff-%s.html#%s">%s</a>`, o.Hash, o.Parent, a, a)
 			l := strings.LastIndex(line, a)
 
 			line = line[:l] + strings.Replace(line[l:], a, b, 1)
