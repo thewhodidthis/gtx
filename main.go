@@ -54,7 +54,6 @@ type project struct {
 // Data is the generic content map passed on to the page template.
 type Data map[string]interface{}
 type page struct {
-	Breadcrumbs []string
 	Data
 	Stylesheet string
 	Title      string
@@ -91,16 +90,20 @@ func (h hash) String() string {
 	return h.Hash
 }
 
-type show struct {
-	Body  string
-	Bin   bool
-	Hash  string
-	Lines []int
-}
-
 type object struct {
 	Hash string
 	Path string
+}
+
+func (o object) Dir() string {
+	return filepath.Join(o.Hash[0:2], o.Hash[2:])
+}
+
+type show struct {
+	Body  string
+	Bin   bool
+	Lines []int
+	object
 }
 
 type commit struct {
@@ -463,7 +466,7 @@ func main() {
 			}
 
 			for _, obj := range c.Tree {
-				dst := filepath.Join(pro.base, "object", obj.Hash[0:2], obj.Hash[2:])
+				dst := filepath.Join(pro.base, "object", obj.Dir())
 
 				if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 					if err != nil {
@@ -473,7 +476,7 @@ func main() {
 					continue
 				}
 
-				func(name string) {
+				func() {
 					cmd := exec.Command("git", "cat-file", "blob", obj.Hash)
 					cmd.Dir = pro.repo
 
@@ -500,10 +503,10 @@ func main() {
 
 						return
 					}
-				}(dst)
+				}()
 
-				func(name string) {
-					f, err := os.Create(name)
+				func(nom string) {
+					f, err := os.Create(nom)
 
 					defer f.Close()
 
@@ -514,14 +517,15 @@ func main() {
 					}
 
 					o := &show{
-						Body:  fmt.Sprintf("This is a binary file! %s", obj.Path),
-						Bin:   types[filepath.Ext(obj.Path)],
-						Hash:  obj.Hash,
-						Lines: nil,
+						object: object{
+							Hash: obj.Hash,
+							Path: obj.Path,
+						},
+						Bin: types[filepath.Ext(obj.Path)],
 					}
 
 					if o.Bin {
-						// TODO
+						// TODO.
 					} else {
 						cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
 						cmd.Dir = pro.repo
@@ -534,15 +538,19 @@ func main() {
 							return
 						}
 
-						o.Body = fmt.Sprintf("%s", out)
-
-						var lines = make([]int, bytes.Count(out, []byte("\n")))
+						sep := []byte("\n")
+						var lines = make([]int, bytes.Count(out, sep))
 
 						for i := range lines {
 							lines[i] = i + 1
 						}
 
+						if bytes.LastIndex(out, sep) != len(out)-1 {
+							lines = append(lines, len(lines))
+						}
+
 						o.Lines = lines
+						o.Body = fmt.Sprintf("%s", out)
 					}
 
 					p := page{
@@ -569,7 +577,7 @@ func main() {
 						return
 					}
 
-					if err := os.Link(name, lnk); err != nil {
+					if err := os.Link(nom, lnk); err != nil {
 						if os.IsExist(err) {
 							return
 						}
