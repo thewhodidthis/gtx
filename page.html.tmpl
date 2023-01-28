@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <base href="{{with .Base}}{{.}}{{else}}/{{end}}">
     <meta charset="utf-8">
     <title>{{.Title}}</title>
     {{- with .Stylesheet }}
@@ -27,7 +28,7 @@
   </head>
   <body>
     <header>
-      <h1><a href="/">{{with .Data.Project}}{{.}}{{else}}Home{{end}}</a></h1>
+      <h1><a href="./">{{with .Data.Project}}{{.}}{{else}}Home{{end}}</a></h1>
       {{- range .Data.Breadcrumbs}}
         <span>{{.}}</span>
       {{- end}}
@@ -36,14 +37,13 @@
       <hr>
       {{- with .Data.Link}}
       <h2>Repository</h2>
-      <p>Clone this repo using: <code>git clone {{.}}</code></p>
+      <p>Static archive for: <code>{{.}}</code></p>
       {{- end}}
-
       {{- with $list := .Data.Branches}}
       <h2>Branches</h2>
-      {{- range $list}}
-      <details open>
-        <summary><samp><em><a href="/branch/{{.Name}}/">{{.Name}}</a></em></samp></summary>
+      {{- range $i, $item := $list}}
+      <details{{if eq $i 0}} open{{end}}>
+        <summary><samp><em><a href="branch/{{.Name}}/">{{.Name}}</a></em></samp></summary>
         {{- with and (len .Commits) (index .Commits 0) }}
         <dl>
           <dt>Author</dt>
@@ -53,7 +53,7 @@
             <time datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "Jan. 02 '06 15:04:05"}}</time>
           </dd>
           <dt>Commit</dt>
-          <dd><a href="/commit/{{.Hash}}/">{{.Hash}}</a></dd>
+          <dd><a href="commit/{{.Hash}}/">{{.Hash}}</a></dd>
           <dt>Subject</dt>
           <dd>{{.Subject}}</dd>
         </dl>
@@ -61,10 +61,10 @@
       </details>
       {{- end}}
       {{- end}}
-
-      {{- with $list := .Data.Commits}}
+      {{- with .Data.Branch}}
+      <h2>Branch: <a href="branch/{{.Name}}/">{{.Name}}</a></h2>
       <table>
-        <caption>{{len $list}} commits total</caption>
+        <caption>{{len .Commits}} commits total</caption>
         <thead>
           <tr>
             <th>Date</th>
@@ -74,35 +74,34 @@
           </tr>
         </thead>
         <tbody>
-        {{- range $list}}
+        {{- range .Commits}}
           <tr>
             <td>
               <time datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "01/02/06 15:04"}}</time>
             </td>
             <td><samp>{{.Abbr}}</samp></td>
-            <td><a href="/commit/{{.Hash}}/">{{.Subject}}</a></td>
+            <td><a href="commit/{{.Hash}}/">{{.Subject}}</a></td>
             <td>{{.Author.Name}}</td>
           </tr>
         {{- end}}
         </tbody>
       </table>
       {{- end}}
-
       {{- with .Data.Commit}}
-      <h2>Branch: <a href="/branch/{{.Branch}}/">{{.Branch}}</a></h2>
+      <h2>Branch: <a href="branch/{{.Branch}}/">{{.Branch}}</a></h2>
       <dl>
         <dt>Author</dt>
         <dd>{{.Author.Name}} <{{.Author.Email}}></dd>
         <dt>Date</dt>
         <dd>{{.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
         <dt>Commit</dt>
-        <dd><a href="/commit/{{.Hash}}/">{{.Hash}}</a></dd>
+        <dd><a href="commit/{{.Hash}}/">{{.Hash}}</a></dd>
         {{- range .Parents }}
         <dt>Parent</dt>
         <dd>
-          <a href="/commit/{{.}}">{{.}}</a>
+          <a href="commit/{{.}}">{{.}}</a>
           &laquo;
-          <a href="/commit/{{$.Data.Commit.Hash}}/diff-{{.}}.html">diff</a>
+          <a href="commit/{{$.Data.Commit.Hash}}/diff-{{.}}.html">diff</a>
         </dd>
         {{- end }}
         {{- with .Body }}
@@ -123,26 +122,25 @@
         <ul>
         {{- range .Tree}}
         <li>
-          <a href="/commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
-          <em><a href="/object/{{.Dir}}" download="{{.Path}}">raw</a></em>
+          <a href="commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
+          <em><a href="object/{{.Dir}}" download="{{.Path}}">raw</a></em>
         </li>
         {{- end}}
         </ul>
       </figure>
       {{- end}}
-
       {{- with .Data.Diff}}
-      <h2>Branch: <a href="/branch/{{.Commit.Branch}}/">{{.Commit.Branch}}</a></h2>
+      <h2>Branch: <a href="branch/{{.Commit.Branch}}/">{{.Commit.Branch}}</a></h2>
       <dl>
         <dt>Author</dt>
         <dd>{{.Commit.Author.Name}} <{{.Commit.Author.Email}}></dd>
         <dt>Date</dt>
         <dd>{{.Commit.Date.Format "Jan. 02 '06 15:04:05"}}</dd>
         <dt>Commit</dt>
-        <dd><a href="/commit/{{.Commit.Hash}}/">{{.Commit.Hash}}</a></dd>
+        <dd><a href="commit/{{.Commit.Hash}}/">{{.Commit.Hash}}</a></dd>
         <dt>Parent</dt>
         <dd>
-          <a href="/commit/{{$.Data.Diff.Parent}}">{{$.Data.Diff.Parent}}</a>
+          <a href="commit/{{$.Data.Diff.Parent}}">{{$.Data.Diff.Parent}}</a>
         </dd>
       </dl>
       <figure>
@@ -150,8 +148,8 @@
         <pre>{{diffbodyparser .}}</pre>
       </figure>
       {{- end }}
-
       {{- with .Data.Object}}
+      {{- $dir := .Dir}}
       <table>
         <tr>
           {{- with .Lines }}
@@ -159,14 +157,14 @@
           <td>
             <pre>
             {{- range . -}}
-              <a href="#L{{.}}" id="L{{.}}">{{printf "%*d" (len $l) .}}</a><br>
+              <a href="object/{{$dir}}.html#L{{.}}" id="L{{.}}">{{printf "%*d" (len $l) .}}</a><br>
             {{- end -}}
             </pre>
           </td>
           {{- end}}
           {{- if .Bin}}
           <td>
-            <p>No text preview is available for <a href="/object/{{.Dir}}" download="{{.Path}}">{{.Path}}</a>.</p>
+            <p>No text preview is available for <a href="object/{{.Dir}}" download="{{.Path}}">{{.Path}}</a>.</p>
           </td>
           {{- else}}
           <td><pre>{{.Body}}</pre></td>
