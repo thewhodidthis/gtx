@@ -121,7 +121,7 @@
         {{- range .Tree}}
         <li>
           <a href="/commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
-          <a href="/object/{{slice .Hash 0 2}}/{{.Hash}}" download="{{.Path}}">raw</a>
+          <a href="/object/{{slice .Hash 0 2}}/{{slice .Hash 2}}" download="{{.Path}}">raw</a>
         </li>
         {{- end}}
         </ul>
@@ -151,14 +151,16 @@
       {{- with .Data.Object}}
       <table>
       <tr>
+        {{- with .Lines }}
         <td>
           <pre>
-          {{- $l := (printf "%d" (len .Lines)) -}}
-          {{- range .Lines -}}
+          {{- $l := (printf "%d" (len .)) -}}
+          {{- range . -}}
             <a href="#L{{.}}" id="L{{.}}">{{printf "%*d" (len $l) .}}</a><br>
           {{- end -}}
           </pre>
         </td>
+        {{- end }}
         <td><pre><code>{{.Body}}</code></pre></td>
       </tr>
       <table>
