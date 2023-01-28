@@ -25,6 +25,9 @@ import (
 // SEP is a browser generated UUID v4 used to separate out commit line items.
 const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
 
+// EMPTY is git's magic empty tree hash.
+const EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 //go:embed page.html.tmpl
 var tpl string
 
@@ -37,6 +40,9 @@ var bline = regexp.MustCompile(`\+(.*?),`)
 
 // Helps target file specific diff blocks.
 var diffanchor = regexp.MustCompile(`b\/(.*?)$`)
+
+// Helps keep track of file extensions git thinks of as binary.
+var types = make(map[string]bool)
 
 type project struct {
 	base     string
@@ -85,6 +91,13 @@ func (h hash) String() string {
 	return h.Hash
 }
 
+type show struct {
+	Body  string
+	Bin   bool
+	Hash  string
+	Lines []int
+}
+
 type object struct {
 	Hash string
 	Path string
@@ -102,6 +115,7 @@ type commit struct {
 	Date    time.Time
 	Project string
 	Tree    []object
+	Types   map[string]bool
 	Subject string
 }
 
@@ -449,7 +463,7 @@ func main() {
 			}
 
 			for _, obj := range c.Tree {
-				dst := filepath.Join(pro.base, "object", obj.Hash[0:2], obj.Hash)
+				dst := filepath.Join(pro.base, "object", obj.Hash[0:2], obj.Hash[2:])
 
 				if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 					if err != nil {
@@ -458,75 +472,6 @@ func main() {
 
 					continue
 				}
-
-				func(name string) {
-					cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
-					cmd.Dir = pro.repo
-
-					out, err := cmd.Output()
-
-					if err != nil {
-						log.Printf("unable to show object: %v", err)
-
-						return
-					}
-
-					f, err := os.Create(name)
-
-					defer f.Close()
-
-					if err != nil {
-						log.Printf("unable to create object: %v", err)
-
-						return
-					}
-
-					var lines = make([]int, bytes.Count(out, []byte("\n")))
-
-					for i := range lines {
-						lines[i] = i + 1
-					}
-
-					p := page{
-						Data: Data{
-							"Object": struct {
-								Body  string
-								Hash  string
-								Lines []int
-							}{
-								Body:  fmt.Sprintf("%s", out),
-								Hash:  obj.Hash,
-								Lines: lines,
-							},
-							"Project": pro.Name,
-						},
-						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr, obj.Path}, ": "),
-					}
-
-					if err := t.Execute(f, p); err != nil {
-						log.Printf("unable to apply template: %v", err)
-
-						return
-					}
-
-					lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
-
-					if err := os.MkdirAll(filepath.Dir(lnk), 0750); err != nil {
-						if err != nil {
-							log.Printf("unable to create hard link path: %v", err)
-						}
-
-						return
-					}
-
-					if err := os.Link(name, lnk); err != nil {
-						if os.IsExist(err) {
-							return
-						}
-
-						log.Printf("unable to hard link object into commit folder: %v", err)
-					}
-				}(fmt.Sprintf("%s.html", dst))
 
 				func(name string) {
 					cmd := exec.Command("git", "cat-file", "blob", obj.Hash)
@@ -556,6 +501,82 @@ func main() {
 						return
 					}
 				}(dst)
+
+				func(name string) {
+					f, err := os.Create(name)
+
+					defer f.Close()
+
+					if err != nil {
+						log.Printf("unable to create object: %v", err)
+
+						return
+					}
+
+					o := &show{
+						Body:  fmt.Sprintf("This is a binary file! %s", obj.Path),
+						Bin:   types[filepath.Ext(obj.Path)],
+						Hash:  obj.Hash,
+						Lines: nil,
+					}
+
+					if o.Bin {
+						// TODO
+					} else {
+						cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
+						cmd.Dir = pro.repo
+
+						out, err := cmd.Output()
+
+						if err != nil {
+							log.Printf("unable to show object: %v", err)
+
+							return
+						}
+
+						o.Body = fmt.Sprintf("%s", out)
+
+						var lines = make([]int, bytes.Count(out, []byte("\n")))
+
+						for i := range lines {
+							lines[i] = i + 1
+						}
+
+						o.Lines = lines
+					}
+
+					p := page{
+						Data: Data{
+							"Object":  *o,
+							"Project": pro.Name,
+						},
+						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr, obj.Path}, ": "),
+					}
+
+					if err := t.Execute(f, p); err != nil {
+						log.Printf("unable to apply template: %v", err)
+
+						return
+					}
+
+					lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
+
+					if err := os.MkdirAll(filepath.Dir(lnk), 0750); err != nil {
+						if err != nil {
+							log.Printf("unable to create hard link path: %v", err)
+						}
+
+						return
+					}
+
+					if err := os.Link(name, lnk); err != nil {
+						if os.IsExist(err) {
+							return
+						}
+
+						log.Printf("unable to hard link object into commit folder: %v", err)
+					}
+				}(fmt.Sprintf("%s.html", dst))
 			}
 
 			func() {
@@ -769,7 +790,7 @@ func (pro *project) commitparser(b string) ([]commit, error) {
 			diffstat, err := pro.diffstatparser(h, p)
 
 			if err != nil {
-				log.Printf("unable to diff stat against parent: %s", err)
+				log.Printf("unable to diffstat against parent: %s", err)
 
 				continue
 			}
@@ -803,7 +824,6 @@ func (pro *project) commitparser(b string) ([]commit, error) {
 }
 
 func (pro *project) treeparser(h string) ([]object, error) {
-	// git ls-tree --format='%(objectname) %(path)' <tree-ish>
 	cmd := exec.Command("git", "ls-tree", "-r", "--format=%(objectname) %(path)", h)
 	cmd.Dir = pro.repo
 
@@ -842,6 +862,14 @@ func (pro *project) diffstatparser(h, p string) (string, error) {
 	feed := strings.Split(strings.TrimSuffix(fmt.Sprintf("%s", out), "\n"), "\n")
 
 	for _, line := range feed {
+		// NOTE: This is hackish I know, attach to project?
+		i := strings.Index(line, "|")
+
+		if i != -1 {
+			ext := filepath.Ext(strings.TrimSpace(line[:i]))
+			types[ext] = strings.Contains(line, "Bin")
+		}
+
 		results = append(results, strings.TrimSpace(line))
 	}
 
