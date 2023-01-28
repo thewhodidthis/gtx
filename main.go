@@ -736,7 +736,7 @@ func (pro *project) commitparser(b string) ([]commit, error) {
 	fst := strings.Join([]string{"%H", "%P", "%s", "%aN", "%aE", "%aD", "%h"}, SEP)
 	ref := fmt.Sprintf("origin/%s", b)
 
-	cmd := exec.Command("git", "log", "--graph", fmt.Sprintf("--format=%s", fst), ref)
+	cmd := exec.Command("git", "log", fmt.Sprintf("--format=%s", fst), ref)
 	cmd.Dir = pro.repo
 
 	out, err := cmd.Output()
@@ -749,10 +749,30 @@ func (pro *project) commitparser(b string) ([]commit, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 
 	for scanner.Scan() {
-		data := strings.Split(scanner.Text(), SEP)
+		text := strings.TrimSpace(scanner.Text())
+		data := strings.Split(text, SEP)
 
-		k := strings.Split(data[0], " ")
-		g, h := k[0], k[1]
+		h := data[0]
+
+		var history []overview
+		var parents []string
+
+		if data[1] != "" {
+			parents = strings.Split(data[1], " ")
+		}
+
+		for _, p := range parents {
+			diffstat, err := pro.diffstatparser(h, p)
+
+			if err != nil {
+				log.Printf("unable to diffstat against parent: %s", err)
+
+				continue
+			}
+
+			history = append(history, overview{diffstat, h, p})
+		}
+
 		a := author{data[4], data[3]}
 
 		date, err := time.Parse("Mon, 2 Jan 2006 15:04:05 -0700", data[5])
@@ -779,25 +799,6 @@ func (pro *project) commitparser(b string) ([]commit, error) {
 			continue
 		}
 
-		var history []overview
-		var parents []string
-
-		if data[1] != "" {
-			parents = strings.Split(data[1], " ")
-		}
-
-		for _, p := range parents {
-			diffstat, err := pro.diffstatparser(h, p)
-
-			if err != nil {
-				log.Printf("unable to diffstat against parent: %s", err)
-
-				continue
-			}
-
-			history = append(history, overview{diffstat, h, p})
-		}
-
 		c := commit{
 			Abbr:    data[6],
 			Author:  a,
@@ -806,7 +807,6 @@ func (pro *project) commitparser(b string) ([]commit, error) {
 			Date:    date,
 			Hash:    h,
 			History: history,
-			Graph:   g,
 			Parents: parents,
 			Project: pro.Name,
 			Subject: data[2],
