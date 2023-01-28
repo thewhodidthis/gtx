@@ -1,11 +1,11 @@
 ## about
 
-Go based [git2html](https://github.com/Hypercubed/git2html) remake with custom templating.
+Go based [git2html](https://github.com/Hypercubed/git2html) remake with custom templating support.
 
 ## preview
 
-Sample git2html output:
-[scrawny-request.surge.sh](https://scrawny-request.surge.sh)
+Sample output:
+[thewhodidthis.com/modules/gtx/](https://thewhodidthis.com/modules/gtx/)
 
 ## requirements
 
