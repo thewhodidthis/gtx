@@ -46,14 +46,16 @@
         <summary><samp><em><a href="/branch/{{.Name}}/">{{.Name}}</a></em></samp></summary>
         {{- with and (len .Commits) (index .Commits 0) }}
         <dl>
-          <dt>Subject</dt>
-          <dd>{{.Subject}}</dd>
           <dt>Author</dt>
           <dd>{{.Author.Name}} <{{.Author.Email}}></dd>
           <dt>Date</dt>
           <dd>
             <time datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "Jan. 02 '06 15:04:05"}}</time>
           </dd>
+          <dt>Commit</dt>
+          <dd><a href="/commit/{{.Hash}}/">{{.Hash}}</a></dd>
+          <dt>Subject</dt>
+          <dd>{{.Subject}}</dd>
         </dl>
         {{- end}}
       </details>
@@ -103,7 +105,7 @@
         </dd>
         {{- end }}
         {{- with .Body }}
-        <dt>Log message</dt>
+        <dt>Message</dt>
         <dd><pre>{{.}}</pre></dd>
         {{- end }}
       </dl>
