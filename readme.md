@@ -2,10 +2,22 @@
 
 Go based [git2html](https://github.com/Hypercubed/git2html) remake with custom templating support.
 
-## preview
+## setup
 
-Sample output:
-[thewhodidthis.com/modules/gtx/](https://thewhodidthis.com/modules/gtx/)
+Download from GitHub directly:
+
+```sh
+go install github.com/thewhodidthis/gtx
+```
+
+## usage
+
+At the very least pass it a repo to be parsing through:
+
+```sh
+# NOTE: Will save output in the current directory.
+gtx -r https://github.com/thewhodidthis/gtx.git
+```
 
 ## requirements
 
