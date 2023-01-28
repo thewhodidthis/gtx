@@ -79,7 +79,7 @@
             <td>
               <time datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "01/02/06 15:04"}}</time>
             </td>
-            <td><code>{{.Abbr}}</code></td>
+            <td><samp>{{.Abbr}}</samp></td>
             <td><a href="/commit/{{.Hash}}/">{{.Subject}}</a></td>
             <td>{{.Author.Name}}</td>
           </tr>
@@ -101,6 +101,7 @@
         <dt>Parent</dt>
         <dd>
           <a href="/commit/{{.}}">{{.}}</a>
+          &laquo;
           <a href="/commit/{{$.Data.Commit.Hash}}/diff-{{.}}.html">diff</a>
         </dd>
         {{- end }}
@@ -123,7 +124,7 @@
         {{- range .Tree}}
         <li>
           <a href="/commit/{{$.Data.Commit.Hash}}/{{.Path}}.html">{{.Path}}</a>
-          <a href="/object/{{slice .Hash 0 2}}/{{slice .Hash 2}}" download="{{.Path}}">raw</a>
+          <em><a href="/object/{{.Dir}}" download="{{.Path}}">raw</a></em>
         </li>
         {{- end}}
         </ul>
@@ -152,21 +153,28 @@
 
       {{- with .Data.Object}}
       <table>
-      <tr>
-        {{- with .Lines }}
-        <td>
-          <pre>
+        <tr>
+          {{- with .Lines }}
           {{- $l := (printf "%d" (len .)) -}}
-          {{- range . -}}
-            <a href="#L{{.}}" id="L{{.}}">{{printf "%*d" (len $l) .}}</a><br>
-          {{- end -}}
-          </pre>
-        </td>
-        {{- end }}
-        <td><pre><code>{{.Body}}</code></pre></td>
-      </tr>
-      <table>
+          <td>
+            <pre>
+            {{- range . -}}
+              <a href="#L{{.}}" id="L{{.}}">{{printf "%*d" (len $l) .}}</a><br>
+            {{- end -}}
+            </pre>
+          </td>
+          {{- end}}
+          {{- if .Bin}}
+          <td>
+            <p>No text preview is available for <a href="/object/{{.Dir}}" download="{{.Path}}">{{.Path}}</a>.</p>
+          </td>
+          {{- else}}
+          <td><pre>{{.Body}}</pre></td>
+          {{- end}}
+        </tr>
+      </table>
       {{- end }}
+      <hr>
       <nav>
         <p>Your are here: {{.Title}}</p>
       </nav>
