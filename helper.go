@@ -1,9 +1,5 @@
 package main
 
-import (
-	"reflect"
-)
-
 type void struct{}
 
 // Helps decide if value contained in slice.
@@ -20,12 +16,16 @@ func contains(s []string, n string) bool {
 
 // Helps clear duplicates in slice.
 // https://stackoverflow.com/questions/66643946/how-to-remove-duplicates-strings-or-int-from-slice-in-go
-func dedupe(input []string) []reflect.Value {
+func dedupe(input []string) []string {
 	set := make(map[string]void)
+	list := []string{}
 
 	for _, v := range input {
-		set[v] = void{}
+		if _, ok := set[v]; !ok {
+			set[v] = void{}
+			list = append(list, v)
+		}
 	}
 
-	return reflect.ValueOf(set).MapKeys()
+	return list
 }
