@@ -102,48 +102,6 @@ type author struct {
 	Name  string
 }
 
-// https://stackoverflow.com/questions/28322997/how-to-get-a-list-of-values-into-a-flag-in-golang/
-type manyflag []string
-
-func (f *manyflag) Set(value string) error {
-	// Make sure there are no duplicates.
-	if !contains(*f, value) {
-		*f = append(*f, value)
-	}
-
-	return nil
-}
-
-func (f *manyflag) String() string {
-	return strings.Join(*f, ", ")
-}
-
-type options struct {
-	Branches manyflag `json:"branches"`
-	config   string
-	Force    bool   `json:"force"`
-	Name     string `json:"name"`
-	Quiet    bool   `json:"quiet"`
-	Source   string `json:"source"`
-	Template string `json:"template"`
-	URL      string `json:"url"`
-}
-
-// Helps store options into a JSON config file.
-func (o *options) save(p string) error {
-	bs, err := json.MarshalIndent(o, "", "  ")
-
-	if err != nil {
-		return fmt.Errorf("unable to encode config file: %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(p, o.config), bs, 0644); err != nil {
-		return fmt.Errorf("unable to save config file: %v", err)
-	}
-
-	return nil
-}
-
 func init() {
 	// Override default usage output.
 	flag.Usage = func() {
