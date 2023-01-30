@@ -363,11 +363,8 @@ func main() {
 
 	for _, b := range branches {
 		log.Printf("processing branch: %s", b)
-		wg.Add(1)
 
 		go func() {
-			defer wg.Done()
-
 			dst := filepath.Join(pro.base, "branch", b.Name, "index.html")
 
 			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
@@ -420,11 +417,7 @@ func main() {
 			}
 
 			for _, par := range c.Parents {
-				wg.Add(1)
-
-				go func() {
-					defer wg.Done()
-
+				func() {
 					cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", par, c.Hash))
 					cmd.Dir = pro.repo
 
