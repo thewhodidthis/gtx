@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -24,24 +23,8 @@ import (
 // EMPTY is git's magic empty tree hash.
 const EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// SEP is a browser generated UUID v4 used to separate out commit line items.
-const SEP = "6f6c1745-e902-474a-9e99-08d0084fb011"
-
 //go:embed page.html.tmpl
 var tpl string
-
-// Match diff body keywords.
-var xline = regexp.MustCompile(`^(deleted|index|new|rename|similarity)`)
-
-// Match diff body @@ del, ins line numbers.
-var aline = regexp.MustCompile(`\-(.*?),`)
-var bline = regexp.MustCompile(`\+(.*?),`)
-
-// Helps target file specific diff blocks.
-var diffanchor = regexp.MustCompile(`b\/(.*?)$`)
-
-// Helps keep track of file extensions git thinks of as binary.
-var types = make(map[string]bool)
 
 // Data is the generic content map passed on to the page template.
 type Data map[string]interface{}
@@ -636,73 +619,4 @@ func main() {
 	}()
 
 	wg.Wait()
-}
-
-func diffbodyparser(d diff) template.HTML {
-	var results []string
-	feed := strings.Split(strings.TrimSuffix(template.HTMLEscapeString(d.Body), "\n"), "\n")
-
-	var a, b string
-
-	for _, line := range feed {
-		if strings.HasPrefix(line, "diff") {
-			line = diffanchor.ReplaceAllString(line, `b/<a id="$1">$1</a>`)
-			line = fmt.Sprintf("<strong>%s</strong>", line)
-		}
-
-		line = xline.ReplaceAllString(line, "<em>$1</em>")
-
-		if strings.HasPrefix(line, "@@") {
-			if a != "" && !strings.HasPrefix(a, "---") {
-				repl := fmt.Sprintf(`<a href="commit/%s/%s.html#L$1">-$1</a>,`, d.Parent, a)
-				line = aline.ReplaceAllString(line, repl)
-			}
-
-			if b != "" && !strings.HasPrefix(b, "+++") {
-				repl := fmt.Sprintf(`<a href="commit/%s/%s.html#L$1">+$1</a>,`, d.Commit.Hash, b)
-				line = bline.ReplaceAllString(line, repl)
-			}
-		}
-
-		if strings.HasPrefix(line, "---") {
-			a = strings.TrimPrefix(line, "--- a/")
-			line = fmt.Sprintf("<mark>%s</mark>", line)
-		} else if strings.HasPrefix(line, "-") {
-			line = fmt.Sprintf("<del>%s</del>", line)
-		}
-
-		if strings.HasPrefix(line, "+++") {
-			b = strings.TrimPrefix(line, "+++ b/")
-			line = fmt.Sprintf("<mark>%s</mark>", line)
-		} else if strings.HasPrefix(line, "+") {
-			line = fmt.Sprintf("<ins>%s</ins>", line)
-		}
-
-		results = append(results, line)
-	}
-
-	return template.HTML(strings.Join(results, "\n"))
-}
-
-func diffstatbodyparser(o overview) template.HTML {
-	var results []string
-	feed := strings.Split(strings.TrimSuffix(o.Body, "\n"), "\n")
-
-	for i, line := range feed {
-		if i < len(feed)-1 {
-			// Link files to corresponding diff.
-			columns := strings.Split(line, "|")
-			files := strings.Split(columns[0], "=>")
-
-			a := strings.TrimSpace(files[len(files)-1])
-			b := fmt.Sprintf(`<a href="commit/%s/diff-%s.html#%s">%s</a>`, o.Hash, o.Parent, a, a)
-			l := strings.LastIndex(line, a)
-
-			line = line[:l] + strings.Replace(line[l:], a, b, 1)
-		}
-
-		results = append(results, line)
-	}
-
-	return template.HTML(strings.Join(results, "\n"))
 }
