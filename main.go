@@ -15,9 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"text/tabwriter"
-	"time"
 )
 
 // EMPTY is git's magic empty tree hash.
@@ -29,7 +27,7 @@ var tpl string
 func init() {
 	// Override default usage output.
 	flag.Usage = func() {
-		// Print usage example ahead of lisiting default options.
+		// Print usage example ahead of listing default options.
 		fmt.Fprintln(flag.CommandLine.Output(), "usage:", os.Args[0], "[<options>] <path>")
 		flag.PrintDefaults()
 	}
@@ -195,7 +193,6 @@ func main() {
 		log.Fatalf("unable to filter branches: %v", err)
 	}
 
-	var wg sync.WaitGroup
 	t := template.Must(template.New("page").Funcs(template.FuncMap{
 		"diffstatbodyparser": diffstatbodyparser,
 		"diffbodyparser":     diffbodyparser,
@@ -357,148 +354,142 @@ func main() {
 						return
 					}
 				}()
-
-				func(nom string) {
-					f, err := os.Create(nom)
-
-					defer f.Close()
-
-					if err != nil {
-						log.Printf("unable to create object: %v", err)
-
-						return
-					}
-
-					o := &show{
-						object: object{
-							Hash: obj.Hash,
-							Path: obj.Path,
-						},
-						Bin: types[filepath.Ext(obj.Path)],
-					}
-
-					if o.Bin {
-						// TODO.
-					} else {
-						cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
-						cmd.Dir = pro.repo
-
-						out, err := cmd.Output()
-
-						if err != nil {
-							log.Printf("unable to show object: %v", err)
-
-							return
-						}
-
-						sep := []byte("\n")
-						var lines = make([]int, bytes.Count(out, sep))
-
-						for i := range lines {
-							lines[i] = i + 1
-						}
-
-						if bytes.LastIndex(out, sep) != len(out)-1 {
-							lines = append(lines, len(lines))
-						}
-
-						o.Lines = lines
-						o.Body = fmt.Sprintf("%s", out)
-					}
-
-					p := page{
-						Data: Data{
-							"Object":  *o,
-							"Project": pro.Name,
-						},
-						Base:  "../../",
-						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr, obj.Path}, ": "),
-					}
-
-					if err := t.Execute(f, p); err != nil {
-						log.Printf("unable to apply template: %v", err)
-
-						return
-					}
-
-					lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
-
-					if err := os.MkdirAll(filepath.Dir(lnk), 0755); err != nil {
-						if err != nil {
-							log.Printf("unable to create hard link path: %v", err)
-						}
-
-						return
-					}
-
-					if err := os.Link(nom, lnk); err != nil {
-						if os.IsExist(err) {
-							return
-						}
-
-						log.Printf("unable to hard link object into commit folder: %v", err)
-					}
-				}(fmt.Sprintf("%s.html", dst))
+				writeNom(fmt.Sprintf("%s.html", dst), obj, pro, b, c, t, base)
 			}
 
-			func() {
-				dst := filepath.Join(base, "index.html")
-				f, err := os.Create(dst)
-
-				defer f.Close()
-
-				if err != nil {
-					log.Printf("unable to create commit page: %v", err)
-
-					return
-				}
-
-				p := page{
-					Data: Data{
-						"Commit":  c,
-						"Project": pro.Name,
-					},
-					Base:  "../../",
-					Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
-				}
-
-				if err := t.Execute(f, p); err != nil {
-					log.Printf("unable to apply template: %v", err)
-
-					return
-				}
-			}()
+			createCommitPage(base, pro, c, b, t)
 		}
 	}
 
-	wg.Add(1)
+	writeTemplate(pro, opt, t, branches)
+}
 
-	go func() {
-		defer wg.Done()
+func writeNom(nom string, obj object, pro *project, b branch, c commit, t *template.Template, base string) {
+	f, err := os.Create(nom)
+	defer f.Close()
 
-		// This is the main index or project home.
-		f, err := os.Create(filepath.Join(pro.base, "index.html"))
+	if err != nil {
+		log.Printf("unable to create object: %v", err)
+		return
+	}
 
-		defer f.Close()
+	o := &show{
+		object: object{
+			Hash: obj.Hash,
+			Path: obj.Path,
+		},
+		Bin: types[filepath.Ext(obj.Path)],
+	}
+
+	if o.Bin {
+		// TODO.
+	} else {
+		cmd := exec.Command("git", "show", "--no-notes", obj.Hash)
+		cmd.Dir = pro.repo
+
+		out, err := cmd.Output()
 
 		if err != nil {
-			log.Fatalf("unable to create home page: %v", err)
+			log.Printf("unable to show object: %v", err)
+
+			return
 		}
 
-		p := page{
-			Data: Data{
-				"Branches": branches,
-				"Link":     opt.URL,
-				"Project":  pro.Name,
-			},
-			Base:  "./",
-			Title: pro.Name,
+		sep := []byte("\n")
+		var lines = make([]int, bytes.Count(out, sep))
+
+		for i := range lines {
+			lines[i] = i + 1
 		}
 
-		if err := t.Execute(f, p); err != nil {
-			log.Fatalf("unable to apply template: %v", err)
+		if bytes.LastIndex(out, sep) != len(out)-1 {
+			lines = append(lines, len(lines))
 		}
-	}()
 
-	wg.Wait()
+		o.Lines = lines
+		o.Body = fmt.Sprintf("%s", out)
+	}
+
+	p := page{
+		Data: Data{
+			"Object":  *o,
+			"Project": pro.Name,
+		},
+		Base:  "../../",
+		Title: strings.Join([]string{pro.Name, b.Name, c.Abbr, obj.Path}, ": "),
+	}
+
+	if err := t.Execute(f, p); err != nil {
+		log.Printf("unable to apply template: %v", err)
+		return
+	}
+
+	lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
+
+	if err := os.MkdirAll(filepath.Dir(lnk), 0755); err != nil {
+		if err != nil {
+			log.Printf("unable to create hard link path: %v", err)
+		}
+		return
+	}
+
+	if err := os.Link(nom, lnk); err != nil {
+		if os.IsExist(err) {
+			return
+		}
+
+		log.Printf("unable to hard link object into commit folder: %v", err)
+	}
+}
+
+func createCommitPage(base string, pro *project, c commit, b branch, t *template.Template) {
+	dst := filepath.Join(base, "index.html")
+	f, err := os.Create(dst)
+
+	defer f.Close()
+
+	if err != nil {
+		log.Printf("unable to create commit page: %v", err)
+		// TODO(spike): handle error?
+		return
+	}
+
+	p := page{
+		Data: Data{
+			"Commit":  c,
+			"Project": pro.Name,
+		},
+		Base:  "../../",
+		Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
+	}
+
+	if err := t.Execute(f, p); err != nil {
+		log.Printf("unable to apply template: %v", err)
+		return
+	}
+}
+
+func writeTemplate(pro *project, opt *options, t *template.Template, branches []branch) {
+	// This is the main index or project home.
+	f, err := os.Create(filepath.Join(pro.base, "index.html"))
+
+	defer f.Close()
+
+	if err != nil {
+		log.Fatalf("unable to create home page: %v", err)
+	}
+
+	p := page{
+		Data: Data{
+			"Branches": branches,
+			"Link":     opt.URL,
+			"Project":  pro.Name,
+		},
+		Base:  "./",
+		Title: pro.Name,
+	}
+
+	if err := t.Execute(f, p); err != nil {
+		log.Fatalf("unable to apply template: %v", err)
+	}
 }

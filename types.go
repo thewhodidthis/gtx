@@ -1,3 +1,10 @@
+package main
+
+import (
+	"path/filepath"
+	"time"
+)
+
 // Data is the generic content map passed on to the page template.
 type Data map[string]interface{}
 type page struct {
@@ -73,4 +80,3 @@ type author struct {
 	Email string
 	Name  string
 }
-
