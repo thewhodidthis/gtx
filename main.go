@@ -180,8 +180,13 @@ func main() {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	pro.updateBranches()
+	branches, err := branchFilter(dir, opt)
+	if err != nil {
+		log.Fatalf("unable to filter branches: %v", err)
+	}
 
-	pro.writePages()
-	pro.writeMainIndex()
+	pro.updateBranches(branches)
+
+	pro.writePages(branches)
+	pro.writeMainIndex(branches)
 }

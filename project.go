@@ -23,7 +23,6 @@ type project struct {
 	repo     string
 	options  *options
 	template *template.Template
-	branches []branch
 }
 
 func NewProject(base string, repo string, options *options) *project {
@@ -33,18 +32,12 @@ func NewProject(base string, repo string, options *options) *project {
 	}
 	template := template.Must(template.New("page").Funcs(funcMap).Parse(tpl))
 
-	branches, err := branchFilter(repo, options)
-	if err != nil {
-		log.Fatalf("unable to filter branches: %v", err)
-	}
-
 	return &project{
 		base:     base,
 		Name:     options.Name,
 		repo:     repo,
 		options:  options,
 		template: template,
-		branches: branches,
 	}
 }
 
@@ -79,8 +72,8 @@ func (p *project) save() error {
 	return exec.Command("git", "clone", p.options.Source, p.repo).Run()
 }
 
-func (p *project) updateBranches() {
-	for _, b := range p.branches {
+func (p *project) updateBranches(branches []branch) {
+	for _, b := range branches {
 		// NOTE: Is this needed still if the repo is downloaded each time the script is run?
 		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
 
@@ -96,8 +89,8 @@ func (p *project) updateBranches() {
 	}
 }
 
-func (p *project) writePages() {
-	for _, b := range p.branches {
+func (p *project) writePages(branches []branch) {
+	for _, b := range branches {
 		log.Printf("processing branch: %s", b)
 
 		go p.writeBranchPage(b)
@@ -138,7 +131,7 @@ func (p *project) writePages() {
 	}
 }
 
-func (p *project) writeMainIndex() {
+func (p *project) writeMainIndex(branches []branch) {
 	// This is the main index or project home.
 	f, err := os.Create(filepath.Join(p.base, "index.html"))
 
@@ -150,7 +143,7 @@ func (p *project) writeMainIndex() {
 
 	page := page{
 		Data: Data{
-			"Branches": p.branches,
+			"Branches": branches,
 			"Link":     p.options.URL,
 			"Project":  p.Name,
 		},
