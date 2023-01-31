@@ -144,7 +144,7 @@ func (p *project) writeMainIndex(branches []branch) {
 	page := page{
 		Data: Data{
 			"Branches": branches,
-			"Link":     p.options.URL,
+			"Source":   p.options.Source,
 			"Project":  p.Name,
 		},
 		Base:  "./",
