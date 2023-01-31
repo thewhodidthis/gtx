@@ -15,7 +15,6 @@ type options struct {
 	Quiet    bool   `json:"quiet"`
 	Source   string `json:"source"`
 	Template string `json:"template"`
-	URL      string `json:"url"`
 }
 
 // Helps store options into a JSON config file.
