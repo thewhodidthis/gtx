@@ -45,21 +45,12 @@ func main() {
 	flag.Var(&opt.Branches, "b", "Target branches")
 	flag.StringVar(&opt.Template, "t", "", "Page template")
 	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
+	flag.BoolVar(&opt.Export, "e", false, "Export default template")
 	flag.BoolVar(&opt.Force, "f", false, "Force rebuild")
 	flag.Parse()
 
 	if opt.Quiet {
 		log.SetOutput(io.Discard)
-	}
-
-	if opt.Template != "" {
-		bs, err := os.ReadFile(opt.Template)
-
-		if err != nil {
-			log.Printf("unable to read template: %v", err)
-		} else {
-			tpl = string(bs)
-		}
 	}
 
 	cwd, err := os.Getwd()
@@ -74,6 +65,25 @@ func main() {
 	// Make sure `dir` is an absolute path.
 	if ok := filepath.IsAbs(dir); !ok {
 		dir = filepath.Join(cwd, dir)
+	}
+
+	if opt.Export {
+		if err := os.WriteFile(filepath.Join(dir, "page.html.tmpl"), []byte(tpl), 0644); err != nil {
+			log.Fatalf("unable to export default template: %v", err)
+		}
+
+		log.Printf("done exporting default template")
+		return
+	}
+
+	if opt.Template != "" {
+		bs, err := os.ReadFile(opt.Template)
+
+		if err != nil {
+			log.Printf("unable to read template: %v", err)
+		} else {
+			tpl = string(bs)
+		}
 	}
 
 	// Create a separate options instance for reading config file values into.
