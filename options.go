@@ -10,6 +10,7 @@ import (
 type options struct {
 	Branches manyflag `json:"branches"`
 	config   string
+	Export   bool   `json:"export"`
 	Force    bool   `json:"force"`
 	Name     string `json:"name"`
 	Quiet    bool   `json:"quiet"`
