@@ -17,3 +17,11 @@ func TestContains(t *testing.T) {
 		}
 	}
 }
+
+func TestDedupe(t *testing.T) {
+  dupes := []string{"one", "one", "two", "three", "three", "three"}
+
+  if len(dedupe(dupes)) != 3 {
+    t.Fail()
+  }
+}
