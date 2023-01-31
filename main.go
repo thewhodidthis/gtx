@@ -44,7 +44,6 @@ func main() {
 	flag.StringVar(&opt.Source, "s", "", "Source repository")
 	flag.Var(&opt.Branches, "b", "Target branches")
 	flag.StringVar(&opt.Template, "t", "", "Page template")
-	flag.StringVar(&opt.URL, "u", "https://host.net/project.git", "Source URL")
 	flag.BoolVar(&opt.Quiet, "q", false, "Be quiet")
 	flag.BoolVar(&opt.Force, "f", false, "Force rebuild")
 	flag.Parse()
