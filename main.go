@@ -198,7 +198,12 @@ func main() {
 		"diffbodyparser":     diffbodyparser,
 	}).Parse(tpl))
 
-	// Update each branch.
+	updateBranches(branches, pro)
+	writePages(branches, pro, t)
+	writeMainIndex(pro, opt, t, branches)
+}
+
+func updateBranches(branches []branch, pro *project) {
 	for _, b := range branches {
 		// NOTE: Is this needed still if the repo is downloaded each time the script is run?
 		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
@@ -210,52 +215,17 @@ func main() {
 
 		if _, err := cmd.Output(); err != nil {
 			log.Printf("unable to fetch branch: %v", err)
-
 			continue
 		}
 	}
+}
 
+
+func writePages(branches []branch, pro *project, t *template.Template) {
 	for _, b := range branches {
 		log.Printf("processing branch: %s", b)
 
-		go func() {
-			dst := filepath.Join(pro.base, "branch", b.Name, "index.html")
-
-			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-				if err != nil {
-					log.Fatalf("unable to create branch directory: %v", err)
-				}
-
-				return
-			}
-
-			f, err := os.Create(dst)
-
-			defer f.Close()
-
-			if err != nil {
-				// TODO: Remove from branches slice?
-				log.Printf("unable to create branch page: %v", err)
-
-				return
-			}
-
-			p := page{
-				Data: Data{
-					"Commits": b.Commits,
-					"Branch":  b,
-					"Project": pro.Name,
-				},
-				Base:  "../../",
-				Title: strings.Join([]string{pro.Name, b.Name}, ": "),
-			}
-
-			if err := t.Execute(f, p); err != nil {
-				log.Printf("unable to apply template: %v", err)
-
-				return
-			}
-		}()
+		go writeBranchPage(pro, b, t)
 
 		for i, c := range b.Commits {
 			log.Printf("processing commit: %s: %d/%d", c.Abbr, i+1, len(b.Commits))
@@ -271,48 +241,7 @@ func main() {
 			}
 
 			for _, par := range c.Parents {
-				func() {
-					cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", par, c.Hash))
-					cmd.Dir = pro.repo
-
-					out, err := cmd.Output()
-
-					if err != nil {
-						log.Printf("unable to diff against parent: %v", err)
-
-						return
-					}
-
-					dst := filepath.Join(base, fmt.Sprintf("diff-%s.html", par))
-					f, err := os.Create(dst)
-
-					defer f.Close()
-
-					if err != nil {
-						log.Printf("unable to create commit diff to parent: %v", err)
-
-						return
-					}
-
-					p := page{
-						Data: Data{
-							"Diff": diff{
-								Body:   fmt.Sprintf("%s", out),
-								Commit: c,
-								Parent: par,
-							},
-							"Project": pro.Name,
-						},
-						Base:  "../../",
-						Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
-					}
-
-					if err := t.Execute(f, p); err != nil {
-						log.Printf("unable to apply template: %v", err)
-
-						return
-					}
-				}()
+				writeCommitDiff(par, c, pro, base, b, t)
 			}
 
 			for _, obj := range c.Tree {
@@ -322,46 +251,147 @@ func main() {
 					if err != nil {
 						log.Printf("unable to create object directory: %v", err)
 					}
-
 					continue
 				}
 
-				func() {
-					cmd := exec.Command("git", "cat-file", "blob", obj.Hash)
-					cmd.Dir = pro.repo
-
-					out, err := cmd.Output()
-
-					if err != nil {
-						log.Printf("unable to save object: %v", err)
-
-						return
-					}
-
-					f, err := os.Create(dst)
-
-					defer f.Close()
-
-					if err != nil {
-						log.Printf("unable to create object: %v", err)
-
-						return
-					}
-
-					if _, err := f.Write(out); err != nil {
-						log.Printf("unable to write object blob: %v", err)
-
-						return
-					}
-				}()
+				writeObjectBlob(obj, pro, dst)
 				writeNom(fmt.Sprintf("%s.html", dst), obj, pro, b, c, t, base)
 			}
 
-			createCommitPage(base, pro, c, b, t)
+			writeCommitPage(base, pro, c, b, t)
 		}
 	}
+}
 
-	writeTemplate(pro, opt, t, branches)
+func writeMainIndex(pro *project, opt *options, t *template.Template, branches []branch) {
+	// This is the main index or project home.
+	f, err := os.Create(filepath.Join(pro.base, "index.html"))
+
+	defer f.Close()
+
+	if err != nil {
+		log.Fatalf("unable to create home page: %v", err)
+	}
+
+	p := page{
+		Data: Data{
+			"Branches": branches,
+			"Link":     opt.URL,
+			"Project":  pro.Name,
+		},
+		Base:  "./",
+		Title: pro.Name,
+	}
+
+	if err := t.Execute(f, p); err != nil {
+		log.Fatalf("unable to apply template: %v", err)
+	}
+}
+
+func writeCommitDiff(par string, c commit, pro *project, base string, b branch, t *template.Template) {
+	cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", par, c.Hash))
+	cmd.Dir = pro.repo
+
+	out, err := cmd.Output()
+
+	if err != nil {
+		log.Printf("unable to diff against parent: %v", err)
+
+		return
+	}
+
+	dst := filepath.Join(base, fmt.Sprintf("diff-%s.html", par))
+	f, err := os.Create(dst)
+
+	defer f.Close()
+
+	if err != nil {
+		log.Printf("unable to create commit diff to parent: %v", err)
+
+		return
+	}
+
+	p := page{
+		Data: Data{
+			"Diff": diff{
+				Body:   fmt.Sprintf("%s", out),
+				Commit: c,
+				Parent: par,
+			},
+			"Project": pro.Name,
+		},
+		Base:  "../../",
+		Title: strings.Join([]string{pro.Name, b.Name, c.Abbr}, ": "),
+	}
+
+	if err := t.Execute(f, p); err != nil {
+		log.Printf("unable to apply template: %v", err)
+
+		return
+	}
+}
+
+func writeBranchPage(pro *project, b branch, t *template.Template) {
+	dst := filepath.Join(pro.base, "branch", b.Name, "index.html")
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		if err != nil {
+			log.Fatalf("unable to create branch directory: %v", err)
+		}
+		return
+	}
+
+	f, err := os.Create(dst)
+
+	defer f.Close()
+
+	if err != nil {
+		// TODO: Remove from branches slice?
+		log.Printf("unable to create branch page: %v", err)
+
+		return
+	}
+
+	p := page{
+		Data: Data{
+			"Commits": b.Commits,
+			"Branch":  b,
+			"Project": pro.Name,
+		},
+		Base:  "../../",
+		Title: strings.Join([]string{pro.Name, b.Name}, ": "),
+	}
+
+	if err := t.Execute(f, p); err != nil {
+		log.Printf("unable to apply template: %v", err)
+		return
+	}
+}
+
+func writeObjectBlob(obj object, pro *project, dst string) {
+	cmd := exec.Command("git", "cat-file", "blob", obj.Hash)
+	cmd.Dir = pro.repo
+
+	out, err := cmd.Output()
+
+	if err != nil {
+		log.Printf("unable to save object: %v", err)
+		return
+	}
+
+	f, err := os.Create(dst)
+
+	defer f.Close()
+
+	if err != nil {
+		log.Printf("unable to create object: %v", err)
+		return
+	}
+
+	if _, err := f.Write(out); err != nil {
+		log.Printf("unable to write object blob: %v", err)
+		return
+	}
 }
 
 func writeNom(nom string, obj object, pro *project, b branch, c commit, t *template.Template, base string) {
@@ -442,7 +472,7 @@ func writeNom(nom string, obj object, pro *project, b branch, c commit, t *templ
 	}
 }
 
-func createCommitPage(base string, pro *project, c commit, b branch, t *template.Template) {
+func writeCommitPage(base string, pro *project, c commit, b branch, t *template.Template) {
 	dst := filepath.Join(base, "index.html")
 	f, err := os.Create(dst)
 
@@ -466,30 +496,5 @@ func createCommitPage(base string, pro *project, c commit, b branch, t *template
 	if err := t.Execute(f, p); err != nil {
 		log.Printf("unable to apply template: %v", err)
 		return
-	}
-}
-
-func writeTemplate(pro *project, opt *options, t *template.Template, branches []branch) {
-	// This is the main index or project home.
-	f, err := os.Create(filepath.Join(pro.base, "index.html"))
-
-	defer f.Close()
-
-	if err != nil {
-		log.Fatalf("unable to create home page: %v", err)
-	}
-
-	p := page{
-		Data: Data{
-			"Branches": branches,
-			"Link":     opt.URL,
-			"Project":  pro.Name,
-		},
-		Base:  "./",
-		Title: pro.Name,
-	}
-
-	if err := t.Execute(f, p); err != nil {
-		log.Fatalf("unable to apply template: %v", err)
 	}
 }
