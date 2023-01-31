@@ -187,20 +187,19 @@ func main() {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	branches, err := pro.branchfilter(opt.Branches)
-
-	if err != nil {
-		log.Fatalf("unable to filter branches: %v", err)
-	}
-
 	t := template.Must(template.New("page").Funcs(template.FuncMap{
 		"diffstatbodyparser": diffstatbodyparser,
 		"diffbodyparser":     diffbodyparser,
 	}).Parse(tpl))
 
+	branches, err := pro.branchfilter(opt.Branches)
+	if err != nil {
+		log.Fatalf("unable to filter branches: %v", err)
+	}
+
 	updateBranches(branches, pro)
 	writePages(branches, pro, t)
-	writeMainIndex(pro, opt, t, branches)
+	writeMainIndex(branches, pro, t, opt)
 }
 
 func updateBranches(branches []branch, pro *project) {
@@ -219,7 +218,6 @@ func updateBranches(branches []branch, pro *project) {
 		}
 	}
 }
-
 
 func writePages(branches []branch, pro *project, t *template.Template) {
 	for _, b := range branches {
@@ -263,7 +261,7 @@ func writePages(branches []branch, pro *project, t *template.Template) {
 	}
 }
 
-func writeMainIndex(pro *project, opt *options, t *template.Template, branches []branch) {
+func writeMainIndex(branches []branch, pro *project, t *template.Template, opt *options) {
 	// This is the main index or project home.
 	f, err := os.Create(filepath.Join(pro.base, "index.html"))
 
