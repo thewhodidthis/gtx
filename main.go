@@ -180,7 +180,7 @@ func main() {
 		log.Fatalf("unable to set up repo: %v", err)
 	}
 
-	branches, err := branchFilter(dir, opt)
+	branches, err := branchFilter(tmp, opt)
 	if err != nil {
 		log.Fatalf("unable to filter branches: %v", err)
 	}
