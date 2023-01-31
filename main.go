@@ -39,7 +39,7 @@ func main() {
 		config: ".jimmy.json",
 	}
 
-	// NOTE: Flags need match each option key's first letter.
+	// NOTE: Flags need to match each option key's first letter.
 	flag.StringVar(&opt.Name, "n", "Jimbo", "Project title")
 	flag.StringVar(&opt.Source, "s", "", "Source repository")
 	flag.Var(&opt.Branches, "b", "Target branches")
@@ -168,7 +168,7 @@ func main() {
 
 	log.Printf("user cache set: %s", tmp)
 
-	pro := NewProject(dir, opt.Name, tmp, opt)
+	pro := NewProject(dir, tmp, opt)
 
 	// Create base directories.
 	if err := pro.init(); err != nil {

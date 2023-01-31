@@ -26,21 +26,21 @@ type project struct {
 	branches []branch
 }
 
-func NewProject(base string, name string, repo string, options *options) *project {
+func NewProject(base string, repo string, options *options) *project {
 	funcMap := template.FuncMap{
 		"diffstatbodyparser": diffstatbodyparser,
 		"diffbodyparser":     diffbodyparser,
 	}
 	template := template.Must(template.New("page").Funcs(funcMap).Parse(tpl))
 
-	branches, err := branchFilter(repo, name, options)
+	branches, err := branchFilter(repo, options)
 	if err != nil {
 		log.Fatalf("unable to filter branches: %v", err)
 	}
 
 	return &project{
 		base:     base,
-		Name:     name,
+		Name:     options.Name,
 		repo:     repo,
 		options:  options,
 		template: template,
