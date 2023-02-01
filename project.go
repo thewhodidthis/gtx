@@ -74,7 +74,6 @@ func (p *project) save() error {
 
 func (p *project) updateBranches(branches []branch) {
 	for _, b := range branches {
-		// NOTE: Is this needed still if the repo is downloaded each time the script is run?
 		ref := fmt.Sprintf("refs/heads/%s:refs/origin/%s", b, b)
 
 		cmd := exec.Command("git", "fetch", "--force", "origin", ref)
