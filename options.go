@@ -18,7 +18,7 @@ type options struct {
 	Template string `json:"template"`
 }
 
-// Helps store options into a JSON config file.
+// Helps store options as JSON.
 func (o *options) save(p string) error {
 	bs, err := json.MarshalIndent(o, "", "  ")
 
