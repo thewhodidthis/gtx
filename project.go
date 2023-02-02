@@ -113,6 +113,13 @@ func (p *project) processBranch(br branch) {
 func (p *project) processCommit(br branch, c commit) {
 	base := filepath.Join(p.base, "commit", c.Hash)
 
+  // Commits don't change.  If the directory already exists, it is up
+  // to date and we can save some work.
+	if _, err := os.Stat(base); err == nil || errors.Is(err, fs.ErrExist) {
+		log.Printf("commit %v already processed", c.Abbr)
+		return
+	}
+
 	if err := os.MkdirAll(base, 0755); err != nil {
 		if err != nil {
 			log.Printf("unable to create commit directory: %v", err)
