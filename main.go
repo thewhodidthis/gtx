@@ -3,9 +3,11 @@ package main
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
@@ -140,7 +142,7 @@ func main() {
 	// The repo flag is required at this point.
 	if ok := filepath.IsAbs(opt.Source); ok {
 		// Option considered repo-like if it contains a hidden `.git` dir.
-		if _, err := os.Stat(filepath.Join(opt.Source, ".git")); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(opt.Source, ".git")); errors.Is(err, fs.ErrNotExist) {
 			flag.Usage()
 			os.Exit(1)
 		}

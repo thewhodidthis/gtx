@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -146,7 +148,6 @@ func (p *project) processObject(obj object, base string, br branch, c commit) {
 func (p *project) writeMainIndex(branches []branch) {
 	// This is the main index or project home.
 	f, err := os.Create(filepath.Join(p.base, "index.html"))
-
 	defer f.Close()
 
 	if err != nil {
@@ -178,8 +179,8 @@ func (p *project) writeCommitDiff(base string, b branch, c commit, parent string
 	}
 
 	dst := filepath.Join(base, fmt.Sprintf("diff-%s.html", parent))
-	f, err := os.Create(dst)
 
+	f, err := os.Create(dst)
 	defer f.Close()
 
 	if err != nil {
@@ -245,7 +246,6 @@ func (p *project) writeObjectBlob(obj object, dst string) {
 	}
 
 	f, err := os.Create(dst)
-
 	defer f.Close()
 
 	if err != nil {
@@ -327,8 +327,7 @@ func (p *project) writeNom(nom string, base string, b branch, c commit, obj obje
 	}
 
 	if err := os.Link(nom, lnk); err != nil {
-		// TODO(spike): this line below looks fishy
-		if os.IsExist(err) {
+		if errors.Is(err, fs.ErrExist) {
 			return
 		}
 		log.Printf("unable to hard link object into commit folder: %v", err)
@@ -338,8 +337,8 @@ func (p *project) writeNom(nom string, base string, b branch, c commit, obj obje
 
 func (p *project) writeCommitPage(base string, b branch, c commit) {
 	dst := filepath.Join(base, "index.html")
-	f, err := os.Create(dst)
 
+	f, err := os.Create(dst)
 	defer f.Close()
 
 	if err != nil {
