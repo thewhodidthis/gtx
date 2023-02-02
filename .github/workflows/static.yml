@@ -37,7 +37,7 @@ jobs:
         with:
           # The Go version to download (if necessary) and use. Supports semver spec and ranges.
           go-version: '>=1.18.0'
-      - run: go run . -s https://github.com/thewhodidthis/gtx.git -n Demo ./_example
+      - run: go run . -s https://github.com/thewhodidthis/gtx.git -n gtx ./_example
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
