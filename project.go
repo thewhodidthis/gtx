@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -90,45 +92,55 @@ func (p *project) updateBranches(branches []branch) {
 }
 
 func (p *project) writePages(branches []branch) {
-	for _, b := range branches {
-		log.Printf("processing branch: %s", b)
-
-		go p.writeBranchPage(b)
-
-		for i, c := range b.Commits {
-			log.Printf("processing commit: %s: %d/%d", c.Abbr, i+1, len(b.Commits))
-
-			base := filepath.Join(p.base, "commit", c.Hash)
-
-			if err := os.MkdirAll(base, 0755); err != nil {
-				if err != nil {
-					log.Printf("unable to create commit directory: %v", err)
-				}
-
-				continue
-			}
-
-			for _, par := range c.Parents {
-				p.writeCommitDiff(par, c, base, b)
-			}
-
-			for _, obj := range c.Tree {
-				dst := filepath.Join(p.base, "object", obj.Dir())
-
-				if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-					if err != nil {
-						log.Printf("unable to create object directory: %v", err)
-					}
-					continue
-				}
-
-				p.writeObjectBlob(obj, dst)
-				p.writeNom(fmt.Sprintf("%s.html", dst), obj, b, c, base)
-			}
-
-			p.writeCommitPage(base, c, b)
-		}
+	for _, branch := range branches {
+		p.processBranch(branch)
 	}
+}
+
+func (p *project) processBranch(br branch) {
+	log.Printf("processing branch: %s", br)
+
+	p.writeBranchPage(br)
+
+	for i, commit := range br.Commits {
+		log.Printf("processing commit: %s: %d/%d", commit.Abbr, i+1, len(br.Commits))
+		p.processCommit(br, commit)
+	}
+}
+
+func (p *project) processCommit(br branch, c commit) {
+	base := filepath.Join(p.base, "commit", c.Hash)
+
+	if err := os.MkdirAll(base, 0755); err != nil {
+		if err != nil {
+			log.Printf("unable to create commit directory: %v", err)
+		}
+		return
+	}
+
+	p.writeCommitPage(base, br, c)
+
+	for _, parent := range c.Parents {
+		p.writeCommitDiff(base, br, c, parent)
+	}
+
+	for _, obj := range c.Tree {
+		p.processObject(obj, base, br, c)
+	}
+}
+
+func (p *project) processObject(obj object, base string, br branch, c commit) {
+	dst := filepath.Join(p.base, "object", obj.Dir())
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		if err != nil {
+			log.Printf("unable to create object directory: %v", err)
+		}
+		return
+	}
+
+	p.writeObjectBlob(obj, dst)
+	p.writeNom(fmt.Sprintf("%s.html", dst), base, br, c, obj)
 }
 
 func (p *project) writeMainIndex(branches []branch) {
@@ -151,31 +163,27 @@ func (p *project) writeMainIndex(branches []branch) {
 		Title: p.Name,
 	}
 
-	if err := p.template.Execute(f, page); err != nil {
-		log.Fatalf("unable to apply template: %v", err)
-	}
+	p.applyTemplate(f, page)
 }
 
-func (p *project) writeCommitDiff(par string, c commit, base string, b branch) {
-	cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", par, c.Hash))
+func (p *project) writeCommitDiff(base string, b branch, c commit, parent string) {
+	cmd := exec.Command("git", "diff", "-p", fmt.Sprintf("%s..%s", parent, c.Hash))
 	cmd.Dir = p.repo
 
 	out, err := cmd.Output()
 
 	if err != nil {
 		log.Printf("unable to diff against parent: %v", err)
-
 		return
 	}
 
-	dst := filepath.Join(base, fmt.Sprintf("diff-%s.html", par))
+	dst := filepath.Join(base, fmt.Sprintf("diff-%s.html", parent))
 	f, err := os.Create(dst)
 
 	defer f.Close()
 
 	if err != nil {
 		log.Printf("unable to create commit diff to parent: %v", err)
-
 		return
 	}
 
@@ -184,7 +192,7 @@ func (p *project) writeCommitDiff(par string, c commit, base string, b branch) {
 			"Diff": diff{
 				Body:   fmt.Sprintf("%s", out),
 				Commit: c,
-				Parent: par,
+				Parent: parent,
 			},
 			"Project": p.Name,
 		},
@@ -192,31 +200,22 @@ func (p *project) writeCommitDiff(par string, c commit, base string, b branch) {
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr}, ": "),
 	}
 
-	if err := p.template.Execute(f, page); err != nil {
-		log.Printf("unable to apply template: %v", err)
-
-		return
-	}
+	p.applyTemplate(f, page)
 }
 
 func (p *project) writeBranchPage(b branch) {
 	dst := filepath.Join(p.base, "branch", b.Name, "index.html")
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		if err != nil {
-			log.Fatalf("unable to create branch directory: %v", err)
-		}
-		return
+		log.Fatalf("unable to create branch directory: %v", err)
 	}
 
 	f, err := os.Create(dst)
-
 	defer f.Close()
 
 	if err != nil {
 		// TODO: Remove from branches slice?
 		log.Printf("unable to create branch page: %v", err)
-
 		return
 	}
 
@@ -230,10 +229,8 @@ func (p *project) writeBranchPage(b branch) {
 		Title: strings.Join([]string{p.Name, b.Name}, ": "),
 	}
 
-	if err := p.template.Execute(f, page); err != nil {
-		log.Printf("unable to apply template: %v", err)
-		return
-	}
+	p.applyTemplate(f, page)
+	return
 }
 
 func (p *project) writeObjectBlob(obj object, dst string) {
@@ -256,13 +253,14 @@ func (p *project) writeObjectBlob(obj object, dst string) {
 		return
 	}
 
-	if _, err := f.Write(out); err != nil {
+	w := bufio.NewWriter(f)
+	if _, err := w.Write(out); err != nil {
 		log.Printf("unable to write object blob: %v", err)
 		return
 	}
 }
 
-func (p *project) writeNom(nom string, obj object, b branch, c commit, base string) {
+func (p *project) writeNom(nom string, base string, b branch, c commit, obj object) {
 	f, err := os.Create(nom)
 	defer f.Close()
 
@@ -289,8 +287,8 @@ func (p *project) writeNom(nom string, obj object, b branch, c commit, base stri
 
 		if err != nil {
 			log.Printf("unable to show object: %v", err)
-
 			return
+
 		}
 
 		sep := []byte("\n")
@@ -317,10 +315,7 @@ func (p *project) writeNom(nom string, obj object, b branch, c commit, base stri
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr, obj.Path}, ": "),
 	}
 
-	if err := p.template.Execute(f, page); err != nil {
-		log.Printf("unable to apply template: %v", err)
-		return
-	}
+	p.applyTemplate(f, page)
 
 	lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
 
@@ -332,15 +327,16 @@ func (p *project) writeNom(nom string, obj object, b branch, c commit, base stri
 	}
 
 	if err := os.Link(nom, lnk); err != nil {
+		// TODO(spike): this line below looks fishy
 		if os.IsExist(err) {
 			return
 		}
-
 		log.Printf("unable to hard link object into commit folder: %v", err)
+		return
 	}
 }
 
-func (p *project) writeCommitPage(base string, c commit, b branch) {
+func (p *project) writeCommitPage(base string, b branch, c commit) {
 	dst := filepath.Join(base, "index.html")
 	f, err := os.Create(dst)
 
@@ -348,7 +344,6 @@ func (p *project) writeCommitPage(base string, c commit, b branch) {
 
 	if err != nil {
 		log.Printf("unable to create commit page: %v", err)
-		// TODO(spike): handle error?
 		return
 	}
 
@@ -360,8 +355,12 @@ func (p *project) writeCommitPage(base string, c commit, b branch) {
 		Base:  "../../",
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr}, ": "),
 	}
+	p.applyTemplate(f, page)
+}
 
-	if err := p.template.Execute(f, page); err != nil {
+func (p *project) applyTemplate(w io.Writer, page page) {
+	bufWriter := bufio.NewWriter(w)
+	if err := p.template.Execute(bufWriter, page); err != nil {
 		log.Printf("unable to apply template: %v", err)
 		return
 	}
