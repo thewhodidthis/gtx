@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/pprof"
 	"strings"
 	"text/tabwriter"
 )
@@ -35,6 +36,13 @@ func init() {
 }
 
 func main() {
+	f, err := os.Create("gtx_buf_writer_parallel_branch.prof")
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(f)
+	defer pprof.StopCPUProfile()
+
 	opt := &options{
 		config: ".jimmy.json",
 	}
@@ -186,7 +194,6 @@ func main() {
 	}
 
 	pro.updateBranches(branches)
-
 	pro.writePages(branches)
 	pro.writeMainIndex(branches)
 }
