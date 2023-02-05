@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -103,7 +105,6 @@ func (p *project) writePages(branches []branch) {
 				if err != nil {
 					log.Printf("unable to create commit directory: %v", err)
 				}
-
 				continue
 			}
 
@@ -113,6 +114,11 @@ func (p *project) writePages(branches []branch) {
 
 			for _, obj := range c.Tree {
 				dst := filepath.Join(p.base, "object", obj.Dir())
+
+				if _, err := os.Stat(base); err == nil || errors.Is(err, fs.ErrExist) {
+					log.Printf("commit %v already processed", c.Abbr)
+					continue
+				}
 
 				if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 					if err != nil {
@@ -163,7 +169,6 @@ func (p *project) writeCommitDiff(par string, c commit, base string, b branch) {
 
 	if err != nil {
 		log.Printf("unable to diff against parent: %v", err)
-
 		return
 	}
 
@@ -174,7 +179,6 @@ func (p *project) writeCommitDiff(par string, c commit, base string, b branch) {
 
 	if err != nil {
 		log.Printf("unable to create commit diff to parent: %v", err)
-
 		return
 	}
 
@@ -193,7 +197,6 @@ func (p *project) writeCommitDiff(par string, c commit, base string, b branch) {
 
 	if err := p.template.Execute(f, page); err != nil {
 		log.Printf("unable to apply template: %v", err)
-
 		return
 	}
 }
@@ -215,7 +218,6 @@ func (p *project) writeBranchPage(b branch) {
 	if err != nil {
 		// TODO: Remove from branches slice?
 		log.Printf("unable to create branch page: %v", err)
-
 		return
 	}
 
