@@ -190,6 +190,7 @@ func main() {
 	}
 
 	branches, err := branchFilter(tmp, opt)
+
 	if err != nil {
 		log.Fatalf("unable to filter branches: %v", err)
 	}
