@@ -163,19 +163,13 @@ func main() {
 		log.Fatalf("unable to save options: %v", err)
 	}
 
-	ucd, err := os.UserCacheDir()
+	tmp, err := os.MkdirTemp("", "")
 
 	if err != nil {
-		log.Fatalf("unable to locate user cache folder: %s", err)
+		log.Fatalf("unable to locate temporary host directory: %s", err)
 	}
 
-	tmp, err := os.MkdirTemp(ucd, "gtx-*")
-
-	if err != nil {
-		log.Fatalf("unable to locate temporary host dir: %s", err)
-	}
-
-	log.Printf("user cache set: %s", tmp)
+	defer os.RemoveAll(tmp)
 
 	pro := NewProject(dir, tmp, opt)
 
