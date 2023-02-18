@@ -1,5 +1,4 @@
 package main
-
 import (
 	_ "embed"
 	"encoding/json"
@@ -73,6 +72,7 @@ func main() {
 		}
 
 		log.Printf("done exporting default template")
+
 		return
 	}
 
