@@ -1,4 +1,5 @@
 package main
+
 import (
 	_ "embed"
 	"encoding/json"
