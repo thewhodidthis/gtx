@@ -146,12 +146,12 @@ func (p *project) writeMainIndex(branches []branch) {
 	}
 
 	page := page{
+		Base: "./",
 		Data: Data{
 			"Branches": branches,
 			"Source":   p.options.Source,
 			"Project":  p.Name,
 		},
-		Base:  "./",
 		Title: p.Name,
 	}
 
@@ -184,15 +184,19 @@ func (p *project) writeCommitDiff(base string, b branch, c commit, par string) {
 	}
 
 	page := page{
+		Base: "../../",
 		Data: Data{
 			"Diff": diff{
 				Body:   fmt.Sprintf("%s", out),
 				Commit: c,
 				Parent: par,
 			},
+			"Path": Data{
+				"Branch": b.Name,
+				"Commit": par,
+			},
 			"Project": p.Name,
 		},
-		Base:  "../../",
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr}, ": "),
 	}
 
@@ -226,12 +230,12 @@ func (p *project) writeBranchPage(b branch) {
 	}
 
 	page := page{
+		Base: "../../",
 		Data: Data{
 			"Commits": b.Commits,
 			"Branch":  b,
 			"Project": p.Name,
 		},
-		Base:  "../../",
 		Title: strings.Join([]string{p.Name, b.Name}, ": "),
 	}
 
@@ -334,11 +338,15 @@ func (p *project) writeObject(dst string, obj object, base string, b branch, c c
 	}
 
 	page := page{
+		Base: "../../",
 		Data: Data{
 			"Object":  *o,
+			"Path": Data{
+				"Branch": b.Name,
+				"Commit": c.Hash,
+			},
 			"Project": p.Name,
 		},
-		Base:  "../../",
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr, obj.Path}, ": "),
 	}
 
@@ -379,11 +387,14 @@ func (p *project) writeCommitPage(base string, b branch, c commit) {
 	}
 
 	page := page{
+		Base: "../../",
 		Data: Data{
 			"Commit":  c,
+			"Path": Data{
+				"Branch": b.Name,
+			},
 			"Project": p.Name,
 		},
-		Base:  "../../",
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr}, ": "),
 	}
 
