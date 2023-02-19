@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -98,4 +101,30 @@ func (f *manyflag) Set(value string) error {
 
 func (f *manyflag) String() string {
 	return strings.Join(*f, ", ")
+}
+
+type options struct {
+	Branches manyflag `json:"branches"`
+	config   string
+	Export   bool   `json:"export"`
+	Force    bool   `json:"force"`
+	Name     string `json:"name"`
+	Quiet    bool   `json:"quiet"`
+	Source   string `json:"source"`
+	Template string `json:"template"`
+}
+
+// Helps store options as JSON.
+func (o *options) save(p string) error {
+	bs, err := json.MarshalIndent(o, "", "  ")
+
+	if err != nil {
+		return fmt.Errorf("failed to encode options: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(p, o.config), bs, 0644); err != nil {
+		return fmt.Errorf("failed to write options: %v", err)
+	}
+
+	return nil
 }
