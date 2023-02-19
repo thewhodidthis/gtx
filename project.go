@@ -191,6 +191,10 @@ func (p *project) writeCommitDiff(base string, b branch, c commit, par string) {
 				Commit: c,
 				Parent: par,
 			},
+			"Path": Data{
+				"Branch": b.Name,
+				"Commit": par,
+			},
 			"Project": p.Name,
 		},
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr}, ": "),
@@ -337,6 +341,10 @@ func (p *project) writeObject(dst string, obj object, base string, b branch, c c
 		Base: "../../",
 		Data: Data{
 			"Object":  *o,
+			"Path": Data{
+				"Branch": b.Name,
+				"Commit": c.Hash,
+			},
 			"Project": p.Name,
 		},
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr, obj.Path}, ": "),
@@ -382,6 +390,9 @@ func (p *project) writeCommitPage(base string, b branch, c commit) {
 		Base: "../../",
 		Data: Data{
 			"Commit":  c,
+			"Path": Data{
+				"Branch": b.Name,
+			},
 			"Project": p.Name,
 		},
 		Title: strings.Join([]string{p.Name, b.Name, c.Abbr}, ": "),
