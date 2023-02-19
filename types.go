@@ -11,8 +11,8 @@ type void struct{}
 // Data is the generic content map passed on to the page template.
 type Data map[string]interface{}
 type page struct {
+	Base string
 	Data
-	Base       string
 	Stylesheet string
 	Title      string
 }
