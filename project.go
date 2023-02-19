@@ -127,7 +127,7 @@ func (p *project) writePages(branches []branch) {
 				}
 
 				p.writeObjectBlob(obj, dst)
-				p.writeObject(fmt.Sprintf("%s.html", dst), obj, base, b, c)
+				p.writeObject(obj, fmt.Sprintf("%s.html", dst), base, b, c)
 			}
 
 			p.writeCommitPage(base, b, c)
@@ -281,7 +281,7 @@ func (p *project) writeObjectBlob(obj object, dst string) {
 	}
 }
 
-func (p *project) writeObject(dst string, obj object, base string, b branch, c commit) {
+func (p *project) writeObject(obj object, dst string, base string, b branch, c commit) {
 	lnk := filepath.Join(base, fmt.Sprintf("%s.html", obj.Path))
 
 	if _, err := os.Stat(lnk); err == nil || errors.Is(err, fs.ErrExist) {
@@ -340,7 +340,7 @@ func (p *project) writeObject(dst string, obj object, base string, b branch, c c
 	page := page{
 		Base: "../../",
 		Data: Data{
-			"Object":  *o,
+			"Object": *o,
 			"Path": Data{
 				"Branch": b.Name,
 				"Commit": c.Hash,
@@ -375,6 +375,13 @@ func (p *project) writeObject(dst string, obj object, base string, b branch, c c
 
 func (p *project) writeCommitPage(base string, b branch, c commit) {
 	dst := filepath.Join(base, "index.html")
+
+	if _, err := os.Stat(dst); err == nil || errors.Is(err, fs.ErrExist) {
+		log.Printf("commit %v already processed", c.Abbr)
+
+		return
+	}
+
 	f, err := os.Create(dst)
 
 	defer f.Close()
@@ -382,14 +389,14 @@ func (p *project) writeCommitPage(base string, b branch, c commit) {
 	if err != nil {
 		log.Printf("unable to create commit page: %v", err)
 
-		// TODO(spike): handle error?
+		// TODO(spike): Handle error?
 		return
 	}
 
 	page := page{
 		Base: "../../",
 		Data: Data{
-			"Commit":  c,
+			"Commit": c,
 			"Path": Data{
 				"Branch": b.Name,
 			},
