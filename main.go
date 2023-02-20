@@ -87,18 +87,18 @@ func main() {
 		}
 	}
 
-	// Create a separate options instance for reading config file values into.
-	store := *opt
-
-	// Need deep copy the underlying slice types.
-	store.Branches = append(store.Branches, opt.Branches...)
-
 	// Attempt to read saved settings.
 	cnf, err := os.ReadFile(filepath.Join(dir, opt.config))
 
 	if err != nil {
 		log.Printf("unable to read config file: %v", err)
 	}
+
+	// Create a separate options instance for reading config file values into.
+	store := *opt
+
+	// Need deep copy the underlying slice types.
+	store.Branches = append(store.Branches, opt.Branches...)
 
 	// If a config file exists and an option has not been set, override default to match.
 	if err := json.Unmarshal(cnf, &store); err != nil {
@@ -191,7 +191,6 @@ func main() {
 	}
 
 	pro.updateBranches(branches)
-
 	pro.writePages(branches)
 	pro.writeMainIndex(branches)
 }
