@@ -173,18 +173,17 @@
       <nav>
         <p>
         {{- if .Data.Branches}}
-          You are home
+          home
         {{- else}}
-          You are here:
           <a href="./">home</a>
           {{- with .Data.Path}}
-            {{- with .Branch}}: <a href="branch/{{.}}/">{{.}}</a>{{- end}}
-            {{- with .Commit}}: <a href="commit/{{.}}/">{{printf "%.7s" .}}</a>{{- end}}
+            {{- with .Branch}} &rsaquo; <a href="branch/{{.}}/">{{.}}</a>{{- end}}
+            {{- with .Commit}} &rsaquo; <a href="commit/{{.}}/">{{printf "%.7s" .}}</a>{{- end}}
           {{- end}}
-          {{- with .Data.Branch}}: <span>{{.Name}}</span>{{- end}}
-          {{- with .Data.Commit}}: <span>{{.Abbr}}</span>{{- end}}
-          {{- with .Data.Object}}: <span>{{.Path}}</span>{{- end}}
-          {{- with .Data.Diff.Commit}}: <span>{{.Abbr}}</span>{{- end}}
+          {{- with .Data.Branch}} &rsaquo; <span>{{.Name}}</span>{{- end}}
+          {{- with .Data.Commit}} &rsaquo; <span>{{.Abbr}}</span>{{- end}}
+          {{- with .Data.Object}} &rsaquo; <span>{{.Path}}</span>{{- end}}
+          {{- with .Data.Diff.Commit}} &rsaquo; <span>{{.Abbr}}</span>{{- end}}
         {{- end}}
         </p>
       </nav>
