@@ -16,8 +16,7 @@ type Data map[string]interface{}
 type page struct {
 	Base string
 	Data
-	Stylesheet string
-	Title      string
+	Title string
 }
 
 type branch struct {

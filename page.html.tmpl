@@ -4,9 +4,6 @@
     <base href="{{with .Base}}{{.}}{{else}}/{{end}}">
     <meta charset="utf-8">
     <title>{{.Title}}</title>
-    {{- with .Stylesheet }}
-    <link rel="stylesheet" href="{{.}}">
-    {{- else }}
     <style>
       html {
         font: medium/normal serif;
@@ -24,7 +21,6 @@
         caption-side: bottom;
       }
     </style>
-    {{- end }}
   </head>
   <body>
     <header>
