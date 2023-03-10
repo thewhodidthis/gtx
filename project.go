@@ -52,7 +52,7 @@ func (p *project) init() error {
 		d := filepath.Join(p.base, dir)
 
 		// Clear existing dirs when -f true.
-		if p.options.Force && dir != "branch" {
+		if p.options.Force {
 			if err := os.RemoveAll(d); err != nil {
 				return fmt.Errorf("unable to remove directory: %v", err)
 			}
