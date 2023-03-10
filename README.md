@@ -19,22 +19,22 @@ Calling without any arguments prints out the default settings. At the very least
 gtx -r https://github.com/thewhodidthis/gtx.git
 ```
 
+Silence the logger:
+
+```sh
+gtx -r https://github.com/thewhodidthis/gtx.git -q
+```
+
 Export a copy of the default HTML page template and quit:
 
 ```sh
 gtx -r https://github.com/thewhodidthis/gtx.git -e
 ```
 
-Use a custom page template:
+Templates can reference external files in the target directory. These are left intact across script runs making it easier to theme the output by linking in stylesheets and other assets as required. Use the `-t` flag to specify a custom template:
 
 ```sh
 gtx -r https://github.com/thewhodidthis/gtx.git -t page.html.tmpl
-```
-
-Silence the logger:
-
-```sh
-gtx -r https://github.com/thewhodidthis/gtx.git -q
 ```
 
 ## requirements
