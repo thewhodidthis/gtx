@@ -25,12 +25,6 @@ Silence the logger:
 gtx -r https://github.com/thewhodidthis/gtx.git -q
 ```
 
-Only process select branches (in order of appearance):
-
-```sh
-gtx -r https://github.com/thewhodidthis/gtx.git -b main -b develop
-```
-
 Export a copy of the default HTML page template and quit:
 
 ```sh
@@ -41,6 +35,12 @@ Templates can reference external files in the target directory. These are left i
 
 ```sh
 gtx -r https://github.com/thewhodidthis/gtx.git -t page.html.tmpl
+```
+
+Only process select branches (in order of appearance):
+
+```sh
+gtx -r https://github.com/thewhodidthis/gtx.git -b main -b develop
 ```
 
 ## requirements
