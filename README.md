@@ -12,6 +12,25 @@ go install github.com/thewhodidthis/gtx
 
 ## usage
 
+What flags and options are available?
+
+```sh
+$ gtx --help
+usage: gtx [<options>] <path>
+  -b value
+    	Target branches
+  -f	Force rebuild
+  -n string
+    	Project title (default "Jimbo")
+  -q	Be quiet
+  -s string
+    	Source repository
+  -t string
+    	Page template
+  -u string
+    	Source URL (default "https://host.net/project.git")
+```
+
 Calling without any arguments prints out the default settings. At the very least pass it a repo to be parsing through:
 
 ```sh
