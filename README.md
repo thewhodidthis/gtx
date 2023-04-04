@@ -1,6 +1,6 @@
 ## about
 
-Go based [`git2html`](https://github.com/Hypercubed/git2html) remake with custom templating support to help when using `git(1)` as an archival tool basically.
+Go based [`git2html`](https://github.com/Hypercubed/git2html) remake with custom templating support to help when using `git(1)` as an archival tool basically, because an HTML copy of your commit history is just enough in many cases, such as with solo projects for example.
 
 ## setup
 
@@ -37,7 +37,7 @@ Templates can reference external files in the target directory. These are left i
 gtx -r https://github.com/thewhodidthis/gtx.git -t page.html.tmpl
 ```
 
-Only process select branches (in order of appearance):
+Only process select branches in order of appearance:
 
 ```sh
 gtx -r https://github.com/thewhodidthis/gtx.git -b main -b develop
