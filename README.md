@@ -1,6 +1,6 @@
 ## about
 
-Go based [`git2html`](https://github.com/Hypercubed/git2html) remake with custom templating support to help when using `git(1)` as an archival tool basically, because an HTML copy of your commit history is just enough in many cases, such as with solo projects for example.
+Go based [`git2html`](https://github.com/Hypercubed/git2html) remake with custom templating support to help when using `git(1)` as an archival tool basically. Because an HTML copy of your commit history is just enough in many cases, such as if aiming to simply publish solo projects for example.
 
 ## setup
 
