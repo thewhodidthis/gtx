@@ -44,16 +44,16 @@ Silence the logger:
 gtx -r https://github.com/thewhodidthis/gtx.git -q
 ```
 
-Export a copy of the default HTML page template and quit:
-
-```sh
-gtx -r https://github.com/thewhodidthis/gtx.git -e
-```
-
 Templates can reference external files in the target directory. These are left intact across script runs making it easier to theme the output by linking in stylesheets and other assets as required. Use the `-t` flag to specify a custom template:
 
 ```sh
 gtx -r https://github.com/thewhodidthis/gtx.git -t page.html.tmpl
+```
+
+Export a copy of the default HTML page template and quit:
+
+```sh
+gtx -r https://github.com/thewhodidthis/gtx.git -e
 ```
 
 Only process select branches in order of appearance:
@@ -68,4 +68,5 @@ gtx -r https://github.com/thewhodidthis/gtx.git -b main -b develop
 
 ## see also
 
-- [git2html](https://github.com/Hypercubed/git2html)
+- [Original GH mirror](https://github.com/Hypercubed/git2html)
+- [Perl version](https://github.com/mmitch/git2html)
