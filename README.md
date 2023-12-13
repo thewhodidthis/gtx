@@ -6,7 +6,7 @@ Go based [`git2html`](https://github.com/Hypercubed/git2html) remake with custom
 
 Download from GitHub directly:
 
-```sh
+```
 go install github.com/thewhodidthis/gtx
 ```
 
@@ -40,25 +40,25 @@ gtx -r https://github.com/thewhodidthis/gtx.git
 
 Silence the logger:
 
-```sh
+```
 gtx -r https://github.com/thewhodidthis/gtx.git -q
 ```
 
 Templates can reference external files in the target directory. These are left intact across script runs making it easier to theme the output by linking in stylesheets and other assets as required. Use the `-t` flag to specify a custom template:
 
-```sh
+```
 gtx -r https://github.com/thewhodidthis/gtx.git -t page.html.tmpl
 ```
 
 Export a copy of the default HTML page template and quit:
 
-```sh
+```
 gtx -r https://github.com/thewhodidthis/gtx.git -e
 ```
 
 Only process select branches in order of appearance:
 
-```sh
+```
 gtx -r https://github.com/thewhodidthis/gtx.git -b main -b develop
 ```
 
